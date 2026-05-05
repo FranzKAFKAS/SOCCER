@@ -1,0 +1,2799 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GridRush — 2 Kişilik Amerikan Futbol Oyunu</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            background: #0a0a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #game-wrapper {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            width: 100vw;
+            height: 100vh;
+            padding: 8px;
+            box-sizing: border-box;
+            gap: 8px;
+        }
+
+        #title {
+            font-family: 'Orbitron', monospace;
+            font-size: 1.4rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #00d4ff, #7b2fff, #ff4d6d);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 4px;
+            text-shadow: none;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        #hud {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
+            flex-shrink: 0;
+        }
+
+        .player-hud {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 240px;
+        }
+
+        .player-hud.p1 {
+            align-items: flex-start;
+        }
+
+        .player-hud.p2 {
+            align-items: flex-end;
+        }
+
+        .player-name {
+            font-family: 'Orbitron', monospace;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+
+        .p1 .player-name {
+            color: #00d4ff;
+        }
+
+        .p2 .player-name {
+            color: #ff4d6d;
+        }
+
+        .abilities-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .p2 .abilities-row {
+            flex-direction: row-reverse;
+        }
+
+        .ability-pip {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .ability-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            border: 2px solid transparent;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.1s;
+        }
+
+        .ability-icon .cooldown-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 0%;
+            background: rgba(0, 0, 0, 0.6);
+            transition: none;
+            pointer-events: none;
+        }
+
+        .ability-label {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.5);
+            letter-spacing: 0.5px;
+        }
+
+        .p1 .ability-icon {
+            background: rgba(0, 212, 255, 0.15);
+            border-color: rgba(0, 212, 255, 0.4);
+        }
+
+        .p2 .ability-icon {
+            background: rgba(255, 77, 109, 0.15);
+            border-color: rgba(255, 77, 109, 0.4);
+        }
+
+        .ability-icon.ready {
+            box-shadow: 0 0 8px currentColor;
+        }
+
+        .ability-icon.active {
+            transform: scale(1.1);
+        }
+
+        .score-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .score-display {
+            font-family: 'Orbitron', monospace;
+            font-size: 2rem;
+            font-weight: 900;
+            color: #fff;
+            letter-spacing: 8px;
+        }
+
+        .timer-display {
+            font-family: 'Orbitron', monospace;
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.5);
+            letter-spacing: 2px;
+        }
+
+        #canvas-container {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 0 60px rgba(0, 212, 255, 0.15), 0 0 120px rgba(123, 47, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            flex: 1;
+            width: 100%;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(10, 10, 26, 0.92);
+            z-index: 10;
+            gap: 20px;
+            transition: opacity 0.4s;
+        }
+
+        #overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #overlay h2 {
+            font-family: 'Orbitron', monospace;
+            font-size: 2.2rem;
+            font-weight: 900;
+            color: #fff;
+            letter-spacing: 4px;
+        }
+
+        #overlay .subtitle {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.85rem;
+            text-align: center;
+            line-height: 1.8;
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-top: 8px;
+        }
+
+        .ctrl-box {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 14px 18px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .ctrl-box h3 {
+            font-family: 'Orbitron', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            margin-bottom: 10px;
+        }
+
+        .ctrl-box.p1-box h3 {
+            color: #00d4ff;
+        }
+
+        .ctrl-box.p2-box h3 {
+            color: #ff4d6d;
+        }
+
+        .ctrl-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 0.78rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .key {
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-family: 'Orbitron', monospace;
+            font-size: 0.65rem;
+            color: #fff;
+            min-width: 22px;
+            text-align: center;
+        }
+
+        #start-btn {
+            background: linear-gradient(135deg, #7b2fff, #00d4ff);
+            border: none;
+            border-radius: 10px;
+            padding: 14px 48px;
+            font-family: 'Orbitron', monospace;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 3px;
+            color: #fff;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+            box-shadow: 0 0 30px rgba(123, 47, 255, 0.5);
+            margin-top: 8px;
+        }
+
+        #start-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 50px rgba(123, 47, 255, 0.8);
+        }
+
+        #controls-hint {
+            display: flex;
+            gap: 16px;
+            margin-top: 4px;
+        }
+
+        .hint-chip {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        #flash-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.8);
+            font-family: 'Orbitron', monospace;
+            font-size: 2.5rem;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 0 40px currentColor;
+            pointer-events: none;
+            opacity: 0;
+            transition: none;
+            z-index: 9;
+            white-space: nowrap;
+        }
+
+        #skill-selection-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(10, 10, 26, 0.98);
+            z-index: 20;
+            gap: 20px;
+            transition: opacity 0.4s;
+        }
+
+        #skill-selection-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #skill-selection-overlay h2 {
+            font-family: 'Orbitron', monospace;
+            font-size: 2.2rem;
+            font-weight: 900;
+            color: #fff;
+            letter-spacing: 4px;
+        }
+
+        .selection-container {
+            display: flex;
+            gap: 40px;
+            width: 90%;
+            max-width: 800px;
+        }
+
+        .player-selection {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .skill-pool {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+            gap: 10px;
+        }
+
+        .skill-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid transparent;
+            border-radius: 8px;
+            padding: 10px 5px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .skill-card:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .skill-card.selected {
+            border-color: currentColor;
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .skill-icon {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .skill-name {
+            font-size: 10px;
+            font-family: 'Orbitron', monospace;
+            color: #fff;
+        }
+
+        .selected-skills {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: auto;
+            padding-top: 15px;
+            border-top: 1px dashed rgba(255, 255, 255, 0.2);
+        }
+
+        .selected-slot {
+            width: 40px;
+            height: 40px;
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        #confirm-skills-btn {
+            background: linear-gradient(135deg, #7b2fff, #00d4ff);
+            border: none;
+            border-radius: 10px;
+            padding: 14px 48px;
+            font-family: 'Orbitron', monospace;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 3px;
+            color: #fff;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s, opacity 0.3s;
+        }
+
+        #confirm-skills-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            filter: grayscale(1);
+        }
+
+        #confirm-skills-btn:not(:disabled):hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(123, 47, 255, 0.8);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="game-wrapper">
+        <div id="title">⚡ GRID RUSH</div>
+
+        <div id="hud">
+            <!-- P1 HUD -->
+            <div class="player-hud p1" id="p1-hud">
+                <div class="player-name">◀ OYUNCU 1</div>
+                <div class="abilities-row" id="p1-abilities"></div>
+            </div>
+
+            <!-- Score Center -->
+            <div class="score-center">
+                <div class="score-display"><span id="score-p1">0</span> — <span id="score-p2">0</span></div>
+                <div class="timer-display" id="timer-display">HAZIR</div>
+            </div>
+
+            <!-- P2 HUD -->
+            <div class="player-hud p2" id="p2-hud">
+                <div class="player-name">OYUNCU 2 ▶</div>
+                <div class="abilities-row" id="p2-abilities"></div>
+            </div>
+        </div>
+
+        <div id="canvas-container">
+            <canvas id="canvas" width="900" height="520"></canvas>
+            <div id="flash-msg"></div>
+
+            <!-- Start Overlay -->
+            <div id="overlay">
+                <h2>⚡ GRID RUSH</h2>
+                <div class="subtitle">Topu al, rakibin gol çizgisine götür!<br>5 sayı yapan kazanır.</div>
+
+                <div class="controls-grid">
+                    <div class="ctrl-box p1-box">
+                        <h3>🔵 OYUNCU 1 (WASD)</h3>
+                        <div class="ctrl-row"><span class="key">W A S D</span> Hareket</div>
+                        <div class="ctrl-row"><span class="key">SPACE</span> 🏈 Yön Pası</div>
+                        <div class="ctrl-row"><span class="key">F</span> Rakibe Fırlat / Topu Al</div>
+                        <div class="ctrl-row"><span class="key">Q</span> Yetenek 1</div>
+                        <div class="ctrl-row"><span class="key">E</span> Yetenek 2</div>
+                        <div class="ctrl-row"><span class="key">R</span> Yetenek 3</div>
+                    </div>
+                    <div class="ctrl-box p2-box">
+                        <h3>🔴 OYUNCU 2 (OKLAR)</h3>
+                        <div class="ctrl-row"><span class="key">↑←↓→</span> Hareket</div>
+                        <div class="ctrl-row"><span class="key">SPACE</span> 🏈 Yön Pası</div>
+                        <div class="ctrl-row"><span class="key">L</span> Rakibe Fırlat / Topu Al</div>
+                        <div class="ctrl-row"><span class="key">U</span> Yetenek 1</div>
+                        <div class="ctrl-row"><span class="key">I</span> Yetenek 2</div>
+                        <div class="ctrl-row"><span class="key">O</span> Yetenek 3</div>
+                    </div>
+                </div>
+
+                <button id="start-btn" onclick="startGame()">OYUNU BAŞLAT</button>
+                <div id="controls-hint">
+                    <div class="hint-chip">🏈 Topu tut &amp; gol çizgisine ulaş</div>
+                    <div class="hint-chip">⚡ Özel yetenekleri akıllıca kullan</div>
+                    <div class="hint-chip" style="color: #00ffcc;">🎮 Gamepad Destekli!</div>
+                </div>
+            </div>
+
+            <!-- Skill Selection Overlay -->
+            <div id="skill-selection-overlay" class="hidden">
+                <h2>SKILL SEÇİMİ</h2>
+                <div class="selection-container">
+                    <div class="player-selection p1-selection">
+                        <h3 style="color: #00d4ff">🔵 OYUNCU 1 (3 Seçim)</h3>
+                        <div class="skill-pool" id="p1-skill-pool"></div>
+                        <div class="selected-skills" id="p1-selected-skills">
+                            <div class="selected-slot" id="p1-slot-0"></div>
+                            <div class="selected-slot" id="p1-slot-1"></div>
+                            <div class="selected-slot" id="p1-slot-2"></div>
+                        </div>
+                    </div>
+                    <div class="player-selection p2-selection">
+                        <h3 style="color: #ff4d6d">🔴 OYUNCU 2 (3 Seçim)</h3>
+                        <div class="skill-pool" id="p2-skill-pool"></div>
+                        <div class="selected-skills" id="p2-selected-skills">
+                            <div class="selected-slot" id="p2-slot-0"></div>
+                            <div class="selected-slot" id="p2-slot-1"></div>
+                            <div class="selected-slot" id="p2-slot-2"></div>
+                        </div>
+                    </div>
+                </div>
+                <button id="confirm-skills-btn" disabled onclick="confirmSkills()">ONAYLA VE BAŞLA</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ─────────────── CANVAS & CONTEXT ───────────────
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let W = 900, H = 520;
+
+        // ─────────────── CONSTANTS ───────────────
+        const FIELD_MARGIN = 40;
+        const END_ZONE_W = 80;
+        let FIELD_LEFT, FIELD_RIGHT, FIELD_TOP, FIELD_BOTTOM, PLAY_LEFT, PLAY_RIGHT;
+
+        function updateFieldBounds() {
+            FIELD_LEFT = FIELD_MARGIN;
+            FIELD_RIGHT = W - FIELD_MARGIN;
+            FIELD_TOP = FIELD_MARGIN;
+            FIELD_BOTTOM = H - FIELD_MARGIN;
+            PLAY_LEFT = FIELD_LEFT + END_ZONE_W;
+            PLAY_RIGHT = FIELD_RIGHT - END_ZONE_W;
+        }
+        updateFieldBounds();
+
+        function resizeGame() {
+            const container = document.getElementById('canvas-container');
+            const rect = container.getBoundingClientRect();
+            W = Math.floor(rect.width) || window.innerWidth;
+            H = Math.floor(rect.height) || (window.innerHeight - 120);
+            canvas.width = W;
+            canvas.height = H;
+            updateFieldBounds();
+            if (!gameRunning) {
+                drawField();
+            }
+        }
+
+        const PLAYER_R = 18;
+        const BALL_R = 10;
+        const PLAYER_SPEED = 3.2;
+        const BALL_FRICTION = 0.93;
+        const THROW_SPEED = 7;
+        const THROW_SPEED_LOB = 5;
+
+        // ─────────────── ABILITY DEFS ───────────────
+        const ALL_SKILLS = [
+            { id: 'clone', icon: '🧬', name: 'Klon', cd: 9000, duration: 5000, color: '#00d4ff' },
+            { id: 'slide', icon: '⚡', name: 'Kayma', cd: 5000, duration: 400, color: '#aa00ff' },
+            { id: 'power', icon: '💥', name: 'Güç', cd: 9000, duration: 2000, color: '#ffd700' },
+            { id: 'selfpass', icon: '🏃‍♂️', name: 'At-Kaçırt', cd: 8000, duration: 1200, color: '#00ffcc' },
+            { id: 'freeze', icon: '❄️', name: 'Dondur', cd: 7000, duration: 2000, color: '#88eeff' },
+            { id: 'reverse', icon: '🔀', name: 'Yön Tersle', cd: 8000, duration: 4000, color: '#ff88bb' },
+            { id: 'lob', icon: '🚀', name: 'Aşırtma', cd: 7000, duration: 0, color: '#ffaa00' },
+            { id: 'sloworb', icon: '🔮', name: 'Buz Küresi', cd: 9000, duration: 5000, color: '#33ffaa' },
+            { id: 'grow', icon: '🐘', name: 'Büyü', cd: 10000, duration: 4000, color: '#ffaaee' },
+            { id: 'shrink', icon: '🐁', name: 'Küçül', cd: 10000, duration: 4000, color: '#aaffaa' },
+            { id: 'smoke', icon: '💨', name: 'Sis', cd: 11000, duration: 6000, color: '#ffffff' },
+            { id: 'hook', icon: '🪝', name: 'Halat', cd: 12000, duration: 800, color: '#ffaa33' },
+        ];
+
+        let p1SelectedSkills = [];
+        let p2SelectedSkills = [];
+
+        // ─────────────── GAME STATE ───────────────
+        let gs = {};
+        let keys = {};
+        let particles = [];
+        let flashTimeout = null;
+        let animId = null;
+        let gameRunning = false;
+        let gameOver = false;
+
+        function initState() {
+            gs = {
+                score: [0, 0],
+                seconds: 0,
+                timerInterval: null,
+                tackleCooldown: 0,   // ms cooldown after a tackle to prevent instant re-steal
+                slowOrbProjectiles: [],
+                slowZones: [],
+                smokeProjectiles: [],
+                smokeZones: [],
+                freezeProjectile: null,
+                hookProjectile: null,
+                foulAttempts: { p1: 0, p2: 0 },  // failed tackle attempts per player
+                penaltyMode: null,  // null | { kicker: 'p1'|'p2', keeper: ..., goalX, goalY, active }
+
+                ball: {
+                    x: W / 2, y: H / 2,
+                    vx: 0, vy: 0,
+                    holder: null,         // null | 'p1' | 'p2'
+                    inAir: false,
+                    lobMode: false,
+                    lobProgress: 0,
+                    lobFrom: null, lobTo: null,
+                    frozenTimer: 0,
+                    shadow: 0,            // for lob arc
+                },
+
+                players: {
+                    p1: {
+                        x: PLAY_LEFT + 60, y: H / 2,
+                        vx: 0, vy: 0,
+                        r: PLAYER_R,
+                        color: '#00d4ff',
+                        glow: '#00d4ff',
+                        facing: 1,
+                        frozenTimer: 0,
+                        poweredTimer: 0,
+                        slideTimer: 0,
+                        slideVx: 0, slideVy: 0,
+                        clones: [],
+                        controlsReversedTimer: 0,
+                        lobPending: false,
+                        lobCharging: false,
+                        lobChargeTimer: 0,
+                        slowOrbCharging: false,
+                        slowOrbChargeTimer: 0,
+                        smokeCharging: false,
+                        smokeChargeTimer: 0,
+                        growTimer: 0,
+                        shrinkTimer: 0,
+                        pullingTimer: 0,
+                        pulledBy: null,
+                        lastDirX: 1, lastDirY: 0,
+                        abilities: [],
+                    },
+                    p2: {
+                        x: PLAY_RIGHT - 60, y: H / 2,
+                        vx: 0, vy: 0,
+                        r: PLAYER_R,
+                        color: '#ff4d6d',
+                        glow: '#ff4d6d',
+                        facing: -1,
+                        frozenTimer: 0,
+                        poweredTimer: 0,
+                        slideTimer: 0,
+                        slideVx: 0, slideVy: 0,
+                        clones: [],
+                        controlsReversedTimer: 0,
+                        lobPending: false,
+                        lobCharging: false,
+                        lobChargeTimer: 0,
+                        slowOrbCharging: false,
+                        slowOrbChargeTimer: 0,
+                        smokeCharging: false,
+                        smokeChargeTimer: 0,
+                        growTimer: 0,
+                        shrinkTimer: 0,
+                        pullingTimer: 0,
+                        pulledBy: null,
+                        lastDirX: -1, lastDirY: 0,
+                        abilities: [],
+                    },
+                },
+            };
+        }
+
+        // ─────────────── HUD BUILD ───────────────
+        function buildHUD() {
+            ['p1', 'p2'].forEach(pid => {
+                const el = document.getElementById(`${pid}-abilities`);
+                el.innerHTML = '';
+                gs.players[pid].abilities.forEach((ab, i) => {
+                    const pip = document.createElement('div');
+                    pip.className = 'ability-pip';
+                    pip.innerHTML = `
+        <div class="ability-icon" id="${pid}-ab-${i}">
+          <span style="position:relative;z-index:1">${ab.icon}</span>
+          <div class="cooldown-fill" id="${pid}-ab-cd-${i}"></div>
+        </div>
+        <div class="ability-label">[${ab.key}]</div>
+      `;
+                    el.appendChild(pip);
+                });
+            });
+        }
+
+        function updateHUD(dt) {
+            ['p1', 'p2'].forEach(pid => {
+                gs.players[pid].abilities.forEach((ab, i) => {
+                    const fill = document.getElementById(`${pid}-ab-cd-${i}`);
+                    const icon = document.getElementById(`${pid}-ab-${i}`);
+                    if (!fill || !icon) return;
+                    const pct = ab.cdLeft > 0 ? (ab.cdLeft / ab.cd) * 100 : 0;
+                    fill.style.height = pct + '%';
+                    icon.className = 'ability-icon' + (ab.cdLeft <= 0 ? ' ready' : '') + (ab.active ? ' active' : '');
+                });
+            });
+
+            document.getElementById('score-p1').textContent = gs.score[0];
+            document.getElementById('score-p2').textContent = gs.score[1];
+        }
+
+        // ─────────────── PARTICLE SYSTEM ───────────────
+        function spawnParticles(x, y, color, count = 12, speed = 3) {
+            for (let i = 0; i < count; i++) {
+                const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+                const s = speed * (0.5 + Math.random());
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * s,
+                    vy: Math.sin(angle) * s,
+                    life: 1,
+                    decay: 0.025 + Math.random() * 0.02,
+                    r: 3 + Math.random() * 3,
+                    color,
+                });
+            }
+        }
+
+        function updateParticles(dt) {
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vx *= 0.96;
+                p.vy *= 0.96;
+                p.life -= p.decay;
+                return p.life > 0;
+            });
+        }
+
+        function drawParticles() {
+            particles.forEach(p => {
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 6;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        // ─────────────── FLASH MESSAGE ───────────────
+        function showFlash(msg, color = '#fff') {
+            const el = document.getElementById('flash-msg');
+            el.textContent = msg;
+            el.style.color = color;
+            el.style.textShadow = `0 0 40px ${color}`;
+            el.style.transition = 'none';
+            el.style.opacity = '1';
+            el.style.transform = 'translate(-50%, -50%) scale(1)';
+            if (flashTimeout) clearTimeout(flashTimeout);
+            flashTimeout = setTimeout(() => {
+                el.style.transition = 'opacity 0.5s, transform 0.5s';
+                el.style.opacity = '0';
+                el.style.transform = 'translate(-50%, -50%) scale(1.3)';
+            }, 800);
+        }
+
+        // ─────────────── ABILITY USAGE ───────────────
+        function useAbility(pid, idx) {
+            const p = gs.players[pid];
+            const ab = p.abilities[idx];
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+
+            if (ab.id === 'clone') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const goUp = Math.random() < 0.5;
+                const realDY = goUp ? -72 : 72;
+                const cloneY = p.y + (goUp ? 72 : -72);
+                const oldY = p.y;
+                p.y = Math.max(FIELD_TOP + 15, Math.min(FIELD_BOTTOM - 15, p.y + realDY));
+                p.clones = [{ x: p.x, y: Math.max(FIELD_TOP + 15, Math.min(FIELD_BOTTOM - 15, cloneY)), life: ab.duration }];
+                spawnParticles(p.x, oldY, p.color, 20, 4);
+                spawnParticles(p.x, p.y, p.color, 10, 3);
+                spawnParticles(p.x, p.clones[0].y, p.color, 10, 3);
+                showFlash('🧬 KLON!', p.color);
+            }
+            else if (ab.id === 'slide') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const speed = 14;
+                let dx = 0, dy = 0;
+                if (pid === 'p1') {
+                    if (keys['KeyW']) dy = -1;
+                    if (keys['KeyS']) dy = 1;
+                    if (keys['KeyA']) dx = -1;
+                    if (keys['KeyD']) dx = 1;
+                } else {
+                    if (keys['ArrowUp']) dy = -1;
+                    if (keys['ArrowDown']) dy = 1;
+                    if (keys['ArrowLeft']) dx = -1;
+                    if (keys['ArrowRight']) dx = 1;
+                }
+                if (dx === 0 && dy === 0) { dx = p.lastDirX; dy = p.lastDirY; }
+                const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                p.slideVx = (dx / len) * speed;
+                p.slideVy = (dy / len) * speed;
+                p.slideTimer = ab.duration;
+                spawnParticles(p.x, p.y, ab.color, 15, 5);
+                showFlash('⚡ KAYMA!', ab.color);
+            }
+            else if (ab.id === 'power') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                p.poweredTimer = ab.duration;
+                spawnParticles(p.x, p.y, ab.color, 25, 6);
+                showFlash('💥 GÜÇ MODU!', ab.color);
+            }
+            else if (ab.id === 'selfpass') {
+                if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                executeSelfPass(pid);
+            }
+            else if (ab.id === 'freeze') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                gs.freezeProjectile = {
+                    x: p.x, y: p.y,
+                    vx: p.lastDirX * 9,
+                    vy: p.lastDirY * 9,
+                    life: 120,
+                    owner: pid
+                };
+                spawnParticles(p.x, p.y, ab.color, 15, 4);
+                showFlash('❄️ DONDUR!', ab.color);
+            }
+            else if (ab.id === 'reverse') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const opp = gs.players[pid === 'p1' ? 'p2' : 'p1'];
+                opp.controlsReversedTimer = ab.duration;
+                spawnParticles(p.x, p.y, ab.color, 18, 5);
+                showFlash('🔀 TERSLE!', ab.color);
+            }
+            else if (ab.id === 'grow') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                p.growTimer = ab.duration;
+                p.shrinkTimer = 0; // cancel opposite
+                spawnParticles(p.x, p.y, ab.color, 20, 5);
+                showFlash('🐘 BÜYÜ!', ab.color);
+            }
+            else if (ab.id === 'shrink') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                p.shrinkTimer = ab.duration;
+                p.growTimer = 0; // cancel opposite
+                spawnParticles(p.x, p.y, ab.color, 20, 5);
+                showFlash('🐁 KÜÇÜL!', ab.color);
+            }
+            else if (ab.id === 'hook') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                gs.hookProjectile = {
+                    x: p.x, y: p.y,
+                    vx: p.lastDirX * 20 + p.vx * 0.5,
+                    vy: p.lastDirY * 20 + p.vy * 0.5,
+                    owner: pid,
+                    life: 60
+                };
+                spawnParticles(p.x, p.y, ab.color, 15, 4);
+                showFlash('🪝 HALAT!', ab.color);
+            }
+        }
+
+        function executeSelfPass(pid) {
+            const p = gs.players[pid];
+            gs.ball.holder = null;
+            gs.ball.inAir = true;
+            const angle = 0.35;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            const kickX = p.lastDirX * cos - p.lastDirY * sin;
+            const kickY = p.lastDirX * sin + p.lastDirY * cos;
+            const SELF_PASS_SPEED = 9.5;
+            gs.ball.vx = kickX * SELF_PASS_SPEED;
+            gs.ball.vy = kickY * SELF_PASS_SPEED;
+            p.poweredTimer = Math.max(p.poweredTimer, 1200);
+            spawnParticles(p.x, p.y, '#00ffcc', 25, 6);
+            showFlash('🏃‍♂️ AT-KAÇIRT!', '#00ffcc');
+        }
+
+        // ─────────────── LOB PASS CHARGE ───────────────
+        function startLobCharge(pid) {
+            const p = gs.players[pid];
+            const ab = p.abilities.find(a => a.id === 'lob');
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+            p.lobCharging = true;
+            p.lobChargeTimer = 0;
+        }
+
+        function executeLobPass(pid) {
+            const p = gs.players[pid];
+            if (!p.lobCharging) return;
+            p.lobCharging = false;
+            const ab = p.abilities.find(a => a.id === 'lob');
+
+            ab.active = true;
+            ab.cdLeft = ab.cd;
+
+            if (gs.ball.holder === pid) {
+                gs.ball.holder = null;
+                gs.ball.lobMode = true;
+                gs.ball.lobProgress = 0;
+                gs.ball.lobFrom = { x: p.x, y: p.y };
+
+                const ratio = Math.min(1, p.lobChargeTimer / 1500);
+                const maxDist = W * 0.85;
+                const dist = 50 + ratio * maxDist;
+
+                gs.ball.lobTo = {
+                    x: Math.max(FIELD_LEFT, Math.min(FIELD_RIGHT, p.x + p.lastDirX * dist)),
+                    y: Math.max(FIELD_TOP, Math.min(FIELD_BOTTOM, p.y + p.lastDirY * dist)),
+                };
+                gs.ball.inAir = true;
+                spawnParticles(p.x, p.y, '#ffaa00', 20, 5);
+                showFlash('🚀 AŞIRTMA!', '#ffaa00');
+            }
+            p.lobChargeTimer = 0;
+        }
+
+        function startSlowOrbCharge(pid) {
+            const p = gs.players[pid];
+            const ab = p.abilities.find(a => a.id === 'sloworb');
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            p.slowOrbCharging = true;
+            p.slowOrbChargeTimer = 0;
+        }
+
+        function executeSlowOrb(pid) {
+            const p = gs.players[pid];
+            if (!p.slowOrbCharging) return;
+            p.slowOrbCharging = false;
+            const ab = p.abilities.find(a => a.id === 'sloworb');
+            if (ab) {
+                ab.cdLeft = ab.cd;
+                ab.active = true;
+                const ratio = Math.min(1, p.slowOrbChargeTimer / 1200);
+                const throwDist = 120 + ratio * 600;
+                const tx = Math.max(FIELD_LEFT, Math.min(FIELD_RIGHT, p.x + p.lastDirX * throwDist));
+                const ty = Math.max(FIELD_TOP, Math.min(FIELD_BOTTOM, p.y + p.lastDirY * throwDist));
+
+                gs.slowOrbProjectiles.push({
+                    x: p.x, y: p.y,
+                    startX: p.x, startY: p.y,
+                    targetX: tx, targetY: ty,
+                    progress: 0,
+                    owner: pid,
+                    duration: ab.duration
+                });
+                spawnParticles(p.x, p.y, ab.color, 15, 4);
+                showFlash('🔮 KÜRE FIRLATILDI!', ab.color);
+            }
+            p.slowOrbChargeTimer = 0;
+        }
+
+        function startSmokeCharge(pid) {
+            const p = gs.players[pid];
+            const ab = p.abilities.find(a => a.id === 'smoke');
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            p.smokeCharging = true;
+            p.smokeChargeTimer = 0;
+        }
+
+        function executeSmoke(pid) {
+            const p = gs.players[pid];
+            if (!p.smokeCharging) return;
+            p.smokeCharging = false;
+            const ab = p.abilities.find(a => a.id === 'smoke');
+            if (ab) {
+                ab.cdLeft = ab.cd;
+                ab.active = true;
+                const ratio = Math.min(1, p.smokeChargeTimer / 1200);
+                const throwDist = 120 + ratio * 600;
+                const tx = Math.max(FIELD_LEFT, Math.min(FIELD_RIGHT, p.x + p.lastDirX * throwDist));
+                const ty = Math.max(FIELD_TOP, Math.min(FIELD_BOTTOM, p.y + p.lastDirY * throwDist));
+
+                gs.smokeProjectiles.push({
+                    x: p.x, y: p.y,
+                    startX: p.x, startY: p.y,
+                    targetX: tx, targetY: ty,
+                    progress: 0,
+                    owner: pid,
+                    duration: ab.duration
+                });
+                spawnParticles(p.x, p.y, ab.color, 15, 4);
+                showFlash('💨 SİS BOMBASI!', ab.color);
+            }
+            p.smokeChargeTimer = 0;
+        }
+
+        // ─────────────── THROW BALL ───────────────
+        function throwBall(pid) {
+            const p = gs.players[pid];
+            const opp = gs.players[pid === 'p1' ? 'p2' : 'p1'];
+            if (gs.ball.holder !== pid) return;
+            gs.ball.holder = null;
+            gs.ball.inAir = true;
+            // throw toward opponent
+            const dx = opp.x - p.x;
+            const dy = opp.y - p.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            gs.ball.vx = (dx / len) * THROW_SPEED;
+            gs.ball.vy = (dy / len) * THROW_SPEED;
+            spawnParticles(gs.ball.x, gs.ball.y, '#ffee00', 10, 4);
+        }
+
+        function pickupBall(pid) {
+            const p = gs.players[pid];
+            const b = gs.ball;
+            if (b.holder !== null || b.lobMode || p.frozenTimer > 0) return;
+            const dx = p.x - b.x, dy = p.y - b.y;
+            if (Math.sqrt(dx * dx + dy * dy) < p.r + BALL_R + 4) {
+                b.holder = pid;
+                b.vx = 0; b.vy = 0;
+                b.inAir = false;
+                spawnParticles(p.x, p.y, p.color, 8, 2);
+            }
+        }
+
+        function dropBall(pid) {
+            const p = gs.players[pid];
+            if (gs.ball.holder !== pid) return;
+            gs.ball.holder = null;
+            gs.ball.vx = p.lastDirX * 1.5;
+            gs.ball.vy = p.lastDirY * 1.5;
+        }
+
+        // ─────────────── TACKLE / FOUL SYSTEM ───────────────
+        const TACKLE_RANGE = 52;   // must be this close to attempt
+
+        function attemptTackle(pid) {
+            const b = gs.ball;
+            const p = gs.players[pid];
+            const oppPid = pid === 'p1' ? 'p2' : 'p1';
+            const opp = gs.players[oppPid];
+
+            if (p.frozenTimer > 0 || gs.penaltyMode) return;
+
+            // Distance to opponent and ball
+            const distToOpp = Math.hypot(opp.x - p.x, opp.y - p.y);
+            const distToBall = Math.hypot(b.x - p.x, b.y - p.y);
+
+            // PRIORITY 1: Interaction with Opponent (FOUL or STEAL)
+            if (distToOpp <= TACKLE_RANGE) {
+                if (b.holder === oppPid) {
+                    // Ball IS held by opponent — shielding/steal logic
+                    const dBallX = b.x - p.x;
+                    const dBallY = b.y - p.y;
+                    const dBall = Math.sqrt(dBallX * dBallX + dBallY * dBallY);
+
+                    let carrierBlocking = false;
+                    if (dBall > 1) {
+                        const rayX = dBallX / dBall;
+                        const rayY = dBallY / dBall;
+                        const dOppX = opp.x - p.x;
+                        const dOppY = opp.y - p.y;
+                        const proj = dOppX * rayX + dOppY * rayY;
+                        if (proj > 0 && proj < dBall) {
+                            const cx = p.x + rayX * proj;
+                            const cy = p.y + rayY * proj;
+                            const perp = Math.hypot(cx - opp.x, cy - opp.y);
+                            if (perp < opp.r * 0.85) carrierBlocking = true;
+                        }
+                    }
+
+                    if (carrierBlocking) {
+                        gs.foulAttempts[pid]++;
+                        spawnParticles(p.x, p.y, '#ff4444', 10, 3);
+                        if (gs.foulAttempts[pid] >= 2) {
+                            gs.foulAttempts[pid] = 0;
+                            triggerFoul(pid, oppPid);
+                        } else {
+                            showFlash('🚨 VÜCUT FAULÜ! (' + gs.foulAttempts[pid] + '/2)', '#ff4444');
+                        }
+                    } else {
+                        // Success!
+                        b.holder = pid; b.vx = 0; b.vy = 0; b.inAir = false;
+                        gs.foulAttempts[pid] = 0;
+                        gs.tackleCooldown = 600;
+                        spawnParticles(p.x, p.y, p.color, 18, 5);
+                        showFlash('🏈 KAPTIRDI!', p.color);
+                    }
+                } else {
+                    // Ball NOT held by opponent but you're tackling them — FOUL!
+                    gs.foulAttempts[pid]++;
+                    spawnParticles(p.x, p.y, '#ff4444', 10, 3);
+                    if (gs.foulAttempts[pid] >= 2) {
+                        gs.foulAttempts[pid] = 0;
+                        triggerFoul(pid, oppPid);
+                    } else {
+                        showFlash('🚨 TOPSUZ ALAN FAULÜ! (' + gs.foulAttempts[pid] + '/2)', '#ff4444');
+                    }
+                }
+                return;
+            }
+
+            // PRIORITY 2: Interaction with Free Ball (PICKUP)
+            if (b.holder === null && !b.lobMode && distToBall <= p.r + BALL_R + 10) {
+                pickupBall(pid);
+            }
+        }
+
+        function triggerFoul(foulerPid, victimPid) {
+            showFlash('🚨 FAUL! ' + (foulerPid === 'p1' ? 'Mavi' : 'Kırmızı') + ' faul yaptı!', '#ff4444');
+            gs.foulAttempts = { p1: 0, p2: 0 };
+            // Start penalty mode after short delay
+            setTimeout(() => startPenaltyMode(victimPid, foulerPid), 1200);
+        }
+
+        function startPenaltyMode(kickerPid, keeperPid) {
+            if (!gameRunning || gameOver) return;
+            const kicker = gs.players[kickerPid];
+
+            // Kicker stands in center, facing the fouler's end zone
+            kicker.x = W / 2;
+            kicker.y = H / 2;
+            kicker.lastDirX = keeperPid === 'p1' ? -1 : 1;
+            kicker.lastDirY = 0;
+
+            // Ball held by kicker
+            gs.ball.holder = kickerPid;
+            gs.ball.x = kicker.x + kicker.lastDirX * (kicker.r + BALL_R + 2);
+            gs.ball.y = kicker.y;
+            gs.ball.vx = 0; gs.ball.vy = 0;
+            gs.ball.inAir = false;
+
+            // Green zone: random position, ~13% wide
+            const greenStart = 0.12 + Math.random() * 0.65;
+
+            const goalX = keeperPid === 'p1' ? PLAY_LEFT : PLAY_RIGHT;
+            const goalY = H / 2;
+            const GOAL_H = 130;
+
+            gs.penaltyMode = {
+                kicker: kickerPid,
+                keeper: keeperPid,       // fouler — speeds up the bar
+                goalX, goalY, goalH: GOAL_H,
+                barPos: 0,               // 0..1
+                barDir: 1,
+                baseSpeed: 0.0012,       // base speed
+                currentSpeed: 0.0012,
+                greenStart,
+                greenWidth: 0.13,
+                active: true,
+                shot: false,
+            };
+
+            spawnParticles(W / 2, H / 2, '#ffaa00', 40, 8);
+            showFlash('🏈 PENALTİ BAR!', '#ffaa00');
+        }
+
+        function updatePenaltyBar(dt) {
+            const pm = gs.penaltyMode;
+            if (!pm || !pm.active || pm.shot) return;
+
+            // Opponent's tackle key speeds up the bar
+            const oppKey = pm.keeper === 'p1' ? 'KeyF' : 'KeyL';
+            const isHolding = keys[oppKey];
+
+            const targetSpeed = isHolding ? pm.baseSpeed * 4 : pm.baseSpeed;
+            // Smoothly interpolate speed
+            pm.currentSpeed += (targetSpeed - pm.currentSpeed) * 0.1;
+
+            pm.barPos += pm.barDir * pm.currentSpeed * dt;
+            if (pm.barPos >= 1) { pm.barPos = 1; pm.barDir = -1; }
+            if (pm.barPos <= 0) { pm.barPos = 0; pm.barDir = 1; }
+        }
+
+        function shootPenalty(pid) {
+            const pm = gs.penaltyMode;
+            if (!pm || !pm.active || pm.shot) return;
+            if (pid !== pm.kicker) return;
+
+            pm.shot = true;
+            const inGreen = pm.barPos >= pm.greenStart && pm.barPos <= pm.greenStart + pm.greenWidth;
+
+            const b = gs.ball;
+            b.holder = null;
+            b.inAir = true;
+
+            // Direction towards goal
+            const dx = pm.goalX - b.x;
+            const dy = (inGreen ? pm.goalY : pm.goalY + (Math.random() > 0.5 ? 1 : -1) * (pm.goalH + 40)) - b.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            const shotSpeed = 18;
+            b.vx = (dx / dist) * shotSpeed;
+            b.vy = (dy / dist) * shotSpeed;
+
+            if (inGreen) {
+                showFlash('🎯 MÜKEMMEL VURUŞ!', '#00ff88');
+                spawnParticles(b.x, b.y, '#00ff88', 20, 5);
+            } else {
+                showFlash('💨 ISKALADI!', '#ff4444');
+                spawnParticles(b.x, b.y, '#ff4444', 15, 3);
+            }
+        }
+
+        function endPenaltyMode(scorerPid) {
+            if (!gs.penaltyMode) return;
+            const pm = gs.penaltyMode;
+            pm.active = false; // Stop bar updates and HUD
+
+            if (scorerPid) {
+                const idx = scorerPid === 'p1' ? 0 : 1;
+                gs.score[idx]++;
+                spawnParticles(W / 2, H / 2, scorerPid === 'p1' ? '#00d4ff' : '#ff4d6d', 60, 8);
+                showFlash(scorerPid === 'p1' ? '🔵 PENALTİ GOL! +1' : '🔴 PENALTİ GOL! +1', scorerPid === 'p1' ? '#00d4ff' : '#ff4d6d');
+                document.getElementById(`score-${scorerPid}`).textContent = gs.score[idx];
+                if (gs.score[idx] >= 5) { endGame(scorerPid); return; }
+            } else {
+                showFlash('❌ PENALTİ ISKALANDI!', '#888');
+            }
+
+            setTimeout(() => {
+                gs.penaltyMode = null;
+                resetRound();
+            }, 1200);
+        }
+
+        // ─────────────── INPUT ───────────────
+        const PASS_SPEED = 15; // px/frame for directional pass
+
+        function directionalPass(pid) {
+            const p = gs.players[pid];
+            const b = gs.ball;
+            if (b.holder !== pid || p.frozenTimer > 0) return;
+
+            b.holder = null;
+            b.inAir = true;
+            b.vx = p.lastDirX * PASS_SPEED;
+            b.vy = p.lastDirY * PASS_SPEED;
+            // Spawn ball just outside the player's radius so auto-pickup can't immediately re-catch it
+            b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+            b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+            spawnParticles(b.x, b.y, pid === 'p1' ? '#00d4ff' : '#ff4d6d', 12, 4);
+            showFlash('🏈 PAS!', pid === 'p1' ? '#00d4ff' : '#ff4d6d');
+        }
+
+        const actionMap = {
+            Space: () => {
+                if (gs.penaltyMode) {
+                    if (gs.penaltyMode.kicker === 'p1') shootPenalty('p1');
+                    else if (gs.penaltyMode.kicker === 'p2') shootPenalty('p2');
+                    return;
+                }
+                if (gs.ball.holder === 'p1') directionalPass('p1');
+                else if (gs.ball.holder === 'p2') directionalPass('p2');
+            },
+            KeyF: () => {
+                if (gs.penaltyMode) return; // Speed boost handled by holding key
+                if (gs.ball.holder === 'p1') throwBall('p1');
+                else attemptTackle('p1');
+            },
+            KeyL: () => {
+                if (gs.penaltyMode) return; // Speed boost handled by holding key
+                if (gs.ball.holder === 'p2') throwBall('p2');
+                else attemptTackle('p2');
+            }
+        };
+
+        document.addEventListener('keydown', e => {
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                e.preventDefault();
+            }
+            if (keys[e.code]) return;
+            keys[e.code] = true;
+            if (gameRunning && !gameOver) {
+                if (actionMap[e.code]) {
+                    actionMap[e.code]();
+                } else {
+                    const p1AbIdx = gs.players.p1.abilities.findIndex(a => a.key === e.code);
+                    if (p1AbIdx !== -1) {
+                        const ab = gs.players.p1.abilities[p1AbIdx];
+                        if (ab.id === 'lob') startLobCharge('p1');
+                        else if (ab.id === 'sloworb') startSlowOrbCharge('p1');
+                        else if (ab.id === 'smoke') startSmokeCharge('p1');
+                        else useAbility('p1', p1AbIdx);
+                    }
+                    const p2AbIdx = gs.players.p2.abilities.findIndex(a => a.key === e.code);
+                    if (p2AbIdx !== -1) {
+                        const ab = gs.players.p2.abilities[p2AbIdx];
+                        if (ab.id === 'lob') startLobCharge('p2');
+                        else if (ab.id === 'sloworb') startSlowOrbCharge('p2');
+                        else if (ab.id === 'smoke') startSmokeCharge('p2');
+                        else useAbility('p2', p2AbIdx);
+                    }
+                }
+            }
+        });
+        document.addEventListener('keyup', e => {
+            keys[e.code] = false;
+            if (gameRunning && !gameOver) {
+                const p1Ab = gs.players.p1.abilities.find(a => a.key === e.code);
+                if (p1Ab && p1Ab.id === 'lob' && gs.players.p1.lobCharging) executeLobPass('p1');
+                if (p1Ab && p1Ab.id === 'sloworb' && gs.players.p1.slowOrbCharging) executeSlowOrb('p1');
+                if (p1Ab && p1Ab.id === 'smoke' && gs.players.p1.smokeCharging) executeSmoke('p1');
+                const p2Ab = gs.players.p2.abilities.find(a => a.key === e.code);
+                if (p2Ab && p2Ab.id === 'lob' && gs.players.p2.lobCharging) executeLobPass('p2');
+                if (p2Ab && p2Ab.id === 'sloworb' && gs.players.p2.slowOrbCharging) executeSlowOrb('p2');
+                if (p2Ab && p2Ab.id === 'smoke' && gs.players.p2.smokeCharging) executeSmoke('p2');
+            }
+        });
+
+        // ─────────────── GAMEPAD INPUT ───────────────
+        const gpPrevButtons = { p1: [], p2: [] };
+
+        function pollGamepadActions() {
+            if (!gameRunning || gameOver) return;
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+
+            ['p1', 'p2'].forEach((pid, index) => {
+                const gp = gamepads[index];
+                if (!gp || !gp.connected) return;
+
+                const prev = gpPrevButtons[pid];
+                const pressed = (btnIdx) => gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed;
+                const justPressed = (btnIdx) => pressed(btnIdx) && !prev[btnIdx];
+                const justReleased = (btnIdx) => !pressed(btnIdx) && prev[btnIdx];
+
+                // Button 0 (A/Cross): Pass / Shoot Penalty
+                if (justPressed(0)) {
+                    if (gs.penaltyMode) {
+                        if (gs.penaltyMode.kicker === pid) shootPenalty(pid);
+                    } else if (gs.ball.holder === pid) {
+                        directionalPass(pid);
+                    }
+                }
+
+                // Button 2 (X/Square): Throw/Pickup
+                if (justPressed(2)) {
+                    if (gs.ball.holder === pid) throwBall(pid);
+                    else pickupBall(pid);
+                }
+
+                // Button 4 (L1/LB): Ability 1
+                if (justPressed(4)) {
+                    const ab = gs.players[pid].abilities[0];
+                    if (ab && ab.id === 'lob') startLobCharge(pid);
+                    else if (ab && ab.id === 'sloworb') startSlowOrbCharge(pid);
+                    else if (ab && ab.id === 'smoke') startSmokeCharge(pid);
+                    else useAbility(pid, 0);
+                }
+                if (justReleased(4)) {
+                    const ab = gs.players[pid].abilities[0];
+                    if (ab && ab.id === 'lob' && gs.players[pid].lobCharging) executeLobPass(pid);
+                    if (ab && ab.id === 'sloworb' && gs.players[pid].slowOrbCharging) executeSlowOrb(pid);
+                    if (ab && ab.id === 'smoke' && gs.players[pid].smokeCharging) executeSmoke(pid);
+                }
+
+                // Button 5 (R1/RB): Ability 2
+                if (justPressed(5)) {
+                    const ab = gs.players[pid].abilities[1];
+                    if (ab && ab.id === 'lob') startLobCharge(pid);
+                    else if (ab && ab.id === 'sloworb') startSlowOrbCharge(pid);
+                    else if (ab && ab.id === 'smoke') startSmokeCharge(pid);
+                    else useAbility(pid, 1);
+                }
+                if (justReleased(5)) {
+                    const ab = gs.players[pid].abilities[1];
+                    if (ab && ab.id === 'lob' && gs.players[pid].lobCharging) executeLobPass(pid);
+                    if (ab && ab.id === 'sloworb' && gs.players[pid].slowOrbCharging) executeSlowOrb(pid);
+                    if (ab && ab.id === 'smoke' && gs.players[pid].smokeCharging) executeSmoke(pid);
+                }
+
+                // Button 3 (Y/Triangle): Ability 3
+                if (justPressed(3)) {
+                    const ab = gs.players[pid].abilities[2];
+                    if (ab && ab.id === 'lob') startLobCharge(pid);
+                    else if (ab && ab.id === 'sloworb') startSlowOrbCharge(pid);
+                    else if (ab && ab.id === 'smoke') startSmokeCharge(pid);
+                    else useAbility(pid, 2);
+                }
+                if (justReleased(3)) {
+                    const ab = gs.players[pid].abilities[2];
+                    if (ab && ab.id === 'lob' && gs.players[pid].lobCharging) executeLobPass(pid);
+                    if (ab && ab.id === 'sloworb' && gs.players[pid].slowOrbCharging) executeSlowOrb(pid);
+                    if (ab && ab.id === 'smoke' && gs.players[pid].smokeCharging) executeSmoke(pid);
+                }
+
+                // Update prev states
+                for (let i = 0; i < gp.buttons.length; i++) {
+                    prev[i] = pressed(i);
+                }
+            });
+        }
+
+        // ─────────────── PHYSICS UPDATE ───────────────
+        function updatePlayer(pid, dt) {
+            const p = gs.players[pid];
+
+            // cooldowns
+            p.abilities.forEach(ab => {
+                if (ab.cdLeft > 0) ab.cdLeft -= dt;
+                else { ab.cdLeft = 0; ab.active = false; }
+            });
+
+            if (p.frozenTimer > 0) {
+                p.frozenTimer -= dt;
+                return;
+            }
+
+            // No movement during penalty mode
+            if (gs.penaltyMode && gs.penaltyMode.active) return;
+            if (p.pullingTimer > 0) {
+                p.pullingTimer -= dt;
+                const owner = gs.players[p.pulledBy];
+                if (owner) {
+                    const dx = owner.x - p.x;
+                    const dy = owner.y - p.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist > 30) {
+                        const pullSpeed = 0.35 * dt;
+                        p.vx = (dx / dist) * pullSpeed;
+                        p.vy = (dy / dist) * pullSpeed;
+                        p.x += p.vx;
+                        p.y += p.vy;
+                        clampPlayer(p);
+                        // Also update ball if held
+                        if (gs.ball.holder === pid) {
+                            gs.ball.x = p.x + p.lastDirX * (p.r * 0.7);
+                            gs.ball.y = p.y + p.lastDirY * (p.r * 0.7);
+                        }
+                    }
+                }
+                if (p.pullingTimer <= 0) p.pulledBy = null;
+                return;
+            }
+
+            // Grow / Shrink decay
+            if (p.growTimer > 0) p.growTimer -= dt;
+            if (p.shrinkTimer > 0) p.shrinkTimer -= dt;
+
+            // Target scale
+            let targetScale = 1.0;
+            if (p.growTimer > 0) targetScale = 1.7;
+            else if (p.shrinkTimer > 0) targetScale = 0.55;
+
+            // Smoothly interpolate radius (frame-rate independent)
+            const currentScale = p.r / PLAYER_R;
+            if (Math.abs(currentScale - targetScale) > 0.01) {
+                const resizeDir = targetScale > currentScale ? 1 : -1;
+                const resizeStep = resizeDir * 0.005 * dt * PLAYER_R;
+                p.r += resizeStep;
+                // Clamp to prevent overshoot
+                if ((resizeDir > 0 && p.r > targetScale * PLAYER_R) || (resizeDir < 0 && p.r < targetScale * PLAYER_R)) {
+                    p.r = targetScale * PLAYER_R;
+                }
+            } else {
+                p.r = targetScale * PLAYER_R;
+            }
+
+            // slide
+            if (p.slideTimer > 0) {
+                p.slideTimer -= dt;
+                p.x += p.slideVx;
+                p.y += p.slideVy;
+                p.slideVx *= 0.9;
+                p.slideVy *= 0.9;
+                clampPlayer(p);
+                if (gs.ball.holder === pid) {
+                    gs.ball.x = p.x + p.lastDirX * (p.r * 0.7);
+                    gs.ball.y = p.y + p.lastDirY * (p.r * 0.7);
+                }
+                return;
+            }
+
+            // normal movement
+            let dx = 0, dy = 0;
+
+            let inSlowZone = false;
+            gs.slowZones.forEach(z => {
+                if (Math.hypot(p.x - z.x, p.y - z.y) < z.radius) {
+                    inSlowZone = true;
+                    if (Math.random() < 0.1) spawnParticles(p.x, p.y + Math.random() * 20 - 10, '#33ffaa', 1, 2);
+                }
+            });
+            const zoneSlow = inSlowZone ? 0.35 : 1.0;
+
+            // Scale speed: bigger = slower, smaller = faster
+            const sizeSpeedMod = p.growTimer > 0 ? 0.65 : (p.shrinkTimer > 0 ? 1.45 : 1.0);
+            const speed = PLAYER_SPEED * (gs.ball.holder === pid ? 0.8 : 1) * (p.poweredTimer > 0 ? 1.4 : 1) * zoneSlow * sizeSpeedMod;
+
+            // Gamepad input mapping
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            const gp = gamepads[pid === 'p1' ? 0 : 1];
+            let gpX = 0, gpY = 0;
+            let usingAnalog = false;
+
+            if (gp && gp.connected) {
+                if (Math.abs(gp.axes[0]) > 0.2) { gpX = gp.axes[0]; usingAnalog = true; }
+                if (Math.abs(gp.axes[1]) > 0.2) { gpY = gp.axes[1]; usingAnalog = true; }
+                if (gp.buttons[12] && gp.buttons[12].pressed) { gpY -= 1; usingAnalog = false; } // DPad Up
+                if (gp.buttons[13] && gp.buttons[13].pressed) { gpY += 1; usingAnalog = false; } // DPad Down
+                if (gp.buttons[14] && gp.buttons[14].pressed) { gpX -= 1; usingAnalog = false; } // DPad Left
+                if (gp.buttons[15] && gp.buttons[15].pressed) { gpX += 1; usingAnalog = false; } // DPad Right
+            }
+
+            if (pid === 'p1') {
+                if (keys['KeyW']) dy -= 1;
+                if (keys['KeyS']) dy += 1;
+                if (keys['KeyA']) dx -= 1;
+                if (keys['KeyD']) dx += 1;
+            } else {
+                if (keys['ArrowUp']) dy -= 1;
+                if (keys['ArrowDown']) dy += 1;
+                if (keys['ArrowLeft']) dx -= 1;
+                if (keys['ArrowRight']) dx += 1;
+            }
+
+            // Analog çubukla tam 360 derece hassasiyet, aksi halde D-Pad / Klavye toplanır
+            if (usingAnalog && dx === 0 && dy === 0) {
+                dx = gpX;
+                dy = gpY;
+            } else {
+                dx += gpX;
+                dy += gpY;
+            }
+
+            // Ters kontrol yeteneği etki ediyorsa yönleri tersle
+            if (p.controlsReversedTimer > 0) {
+                dx = -dx;
+                dy = -dy;
+                p.controlsReversedTimer -= dt;
+            }
+
+            // (p.facing kaldırıldı, yerine lastDirX/Y kullanılıyor)
+
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            if (dx !== 0 || dy !== 0) {
+                p.x += (dx / len) * speed;
+                p.y += (dy / len) * speed;
+                p.lastDirX = dx / len;
+                p.lastDirY = dy / len;
+                // Move clones in perfect sync with real player
+                p.clones.forEach(c => {
+                    c.x += (dx / len) * speed;
+                    c.y += (dy / len) * speed;
+                    c.x = Math.max(FIELD_LEFT + PLAYER_R, Math.min(FIELD_RIGHT - PLAYER_R, c.x));
+                    c.y = Math.max(FIELD_TOP + PLAYER_R, Math.min(FIELD_BOTTOM - PLAYER_R, c.y));
+                });
+            }
+
+            // Clone lifetime decay
+            p.clones = p.clones.filter(c => { c.life -= dt; return c.life > 0; });
+
+            // power decay
+            if (p.poweredTimer > 0) p.poweredTimer -= dt;
+
+            // lob charging logic
+            if (p.lobCharging) {
+                p.lobChargeTimer += dt;
+                let tx = 99999, ty = 99999;
+                if (p.lastDirX < 0) tx = (p.x - FIELD_LEFT) / -p.lastDirX;
+                else if (p.lastDirX > 0) tx = (FIELD_RIGHT - p.x) / p.lastDirX;
+                if (p.lastDirY < 0) ty = (p.y - FIELD_TOP) / -p.lastDirY;
+                else if (p.lastDirY > 0) ty = (FIELD_BOTTOM - p.y) / p.lastDirY;
+                const distToEdge = Math.max(0, Math.min(tx, ty));
+                const rate = (W * 0.85) / 1500;
+                let dynamicMaxTime = (distToEdge - 30) / rate;
+                dynamicMaxTime = Math.max(350, Math.min(1500, dynamicMaxTime));
+
+                if (p.lobChargeTimer > dynamicMaxTime) {
+                    p.lobCharging = false;
+                    p.lobChargeTimer = 0;
+                    const lobAb = p.abilities.find(a => a.id === 'lob');
+                    if (lobAb) lobAb.cdLeft = lobAb.cd;
+                    spawnParticles(p.x, p.y, '#555', 15, 3);
+                    showFlash('❌ ALAN BİTTİ!', '#888');
+                }
+            }
+
+            if (p.slowOrbCharging) {
+                p.slowOrbChargeTimer += dt;
+                let tx = 99999, ty = 99999;
+                if (p.lastDirX < 0) tx = (p.x - FIELD_LEFT) / -p.lastDirX;
+                else if (p.lastDirX > 0) tx = (FIELD_RIGHT - p.x) / p.lastDirX;
+                if (p.lastDirY < 0) ty = (p.y - FIELD_TOP) / -p.lastDirY;
+                else if (p.lastDirY > 0) ty = (FIELD_BOTTOM - p.y) / p.lastDirY;
+                const distToEdge = Math.max(0, Math.min(tx, ty));
+                const rate = (W * 0.85) / 1200;
+                let dynamicMaxTime = (distToEdge - 30) / rate;
+                dynamicMaxTime = Math.max(350, Math.min(1200, dynamicMaxTime));
+
+                if (p.slowOrbChargeTimer > dynamicMaxTime) {
+                    p.slowOrbCharging = false;
+                    p.slowOrbChargeTimer = 0;
+                    const orbAb = p.abilities.find(a => a.id === 'sloworb');
+                    if (orbAb) orbAb.cdLeft = orbAb.cd;
+                    spawnParticles(p.x, p.y, '#555', 15, 3);
+                    showFlash('❌ KÜRE BİTTİ!', '#888');
+                }
+            }
+
+            if (p.smokeCharging) {
+                p.smokeChargeTimer += dt;
+                let tx = 99999, ty = 99999;
+                if (p.lastDirX < 0) tx = (p.x - FIELD_LEFT) / -p.lastDirX;
+                else if (p.lastDirX > 0) tx = (FIELD_RIGHT - p.x) / p.lastDirX;
+                if (p.lastDirY < 0) ty = (p.y - FIELD_TOP) / -p.lastDirY;
+                else if (p.lastDirY > 0) ty = (FIELD_BOTTOM - p.y) / p.lastDirY;
+                const distToEdge = Math.max(0, Math.min(tx, ty));
+                const rate = (W * 0.85) / 1200;
+                let dynamicMaxTime = (distToEdge - 30) / rate;
+                dynamicMaxTime = Math.max(350, Math.min(1200, dynamicMaxTime));
+
+                if (p.smokeChargeTimer > dynamicMaxTime) {
+                    p.smokeCharging = false;
+                    p.smokeChargeTimer = 0;
+                    const smokeAb = p.abilities.find(a => a.id === 'smoke');
+                    if (smokeAb) smokeAb.cdLeft = smokeAb.cd;
+                    spawnParticles(p.x, p.y, '#555', 15, 3);
+                    showFlash('❌ SİS BİTTİ!', '#888');
+                }
+            }
+
+            clampPlayer(p);
+
+            if (gs.ball.holder === pid) {
+                gs.ball.x = p.x + p.lastDirX * (p.r * 0.7);
+                gs.ball.y = p.y + p.lastDirY * (p.r * 0.7);
+            }
+        }
+
+        function clampPlayer(p) {
+            p.x = Math.max(FIELD_LEFT + p.r, Math.min(FIELD_RIGHT - p.r, p.x));
+            p.y = Math.max(FIELD_TOP + p.r, Math.min(FIELD_BOTTOM - p.r, p.y));
+        }
+
+        function updateBall(dt) {
+            const b = gs.ball;
+
+            if (b.holder !== null) return;
+
+            if (b.lobMode) {
+                b.lobProgress += 0.018;
+                if (b.lobProgress >= 1) {
+                    b.lobProgress = 1;
+                    b.lobMode = false;
+                    b.x = b.lobTo.x;
+                    b.y = b.lobTo.y;
+                    b.vx = 0; b.vy = 0;
+                    b.inAir = false;
+                    spawnParticles(b.x, b.y, '#ffaa00', 15, 4);
+                } else {
+                    // Bezier arc
+                    const t = b.lobProgress;
+                    const mx = (b.lobFrom.x + b.lobTo.x) / 2;
+                    const my = Math.min(b.lobFrom.y, b.lobTo.y) - 120;
+                    b.x = (1 - t) * (1 - t) * b.lobFrom.x + 2 * (1 - t) * t * mx + t * t * b.lobTo.x;
+                    b.y = (1 - t) * (1 - t) * b.lobFrom.y + 2 * (1 - t) * t * my + t * t * b.lobTo.y;
+                }
+                return;
+            }
+
+            b.x += b.vx;
+            b.y += b.vy;
+
+            // No friction during penalty shot so it always reaches the goal line
+            if (!(gs.penaltyMode && gs.penaltyMode.shot)) {
+                b.vx *= BALL_FRICTION;
+                b.vy *= BALL_FRICTION;
+            }
+
+            // wall bounce — elastic with 0.82 restitution for satisfying feel
+            // Skip bounce during penalty shot so ball can enter net area properly
+            if (!(gs.penaltyMode && gs.penaltyMode.shot)) {
+                if (b.x - BALL_R < FIELD_LEFT) { b.x = FIELD_LEFT + BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); }
+                if (b.x + BALL_R > FIELD_RIGHT) { b.x = FIELD_RIGHT - BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); }
+                if (b.y - BALL_R < FIELD_TOP) { b.y = FIELD_TOP + BALL_R; b.vy *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); }
+                if (b.y + BALL_R > FIELD_BOTTOM) { b.y = FIELD_BOTTOM - BALL_R; b.vy *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); }
+            }
+
+            if (Math.abs(b.vx) < 0.1) b.vx = 0;
+            if (Math.abs(b.vy) < 0.1) b.vy = 0;
+        }
+
+        function checkCollisions(dt) {
+            const p1 = gs.players.p1;
+            const p2 = gs.players.p2;
+            const b = gs.ball;
+
+            // Tackle cooldown
+            if (gs.tackleCooldown > 0) gs.tackleCooldown -= dt;
+
+            // Player-player collision
+            const dx = p2.x - p1.x, dy = p2.y - p1.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const minDist = p1.r + p2.r;
+            if (dist < minDist && dist > 0) {
+                const nx = dx / dist, ny = dy / dist;
+                const overlap = minDist - dist;
+
+                // Always separate players
+                p1.x -= nx * overlap * 0.5;
+                p1.y -= ny * overlap * 0.5;
+                p2.x += nx * overlap * 0.5;
+                p2.y += ny * overlap * 0.5;
+
+                // Powered player knocks ball loose on contact
+                if (gs.tackleCooldown <= 0) {
+                    if (p1.poweredTimer > 0 && b.holder === 'p2') {
+                        b.holder = null; b.vx = nx * 6; b.vy = ny * 6; b.inAir = true;
+                        gs.tackleCooldown = 800;
+                        spawnParticles(p2.x, p2.y, '#ffd700', 20, 6);
+                        showFlash('🔥 YIKILDI!', '#ffd700');
+                    } else if (p2.poweredTimer > 0 && b.holder === 'p1') {
+                        b.holder = null; b.vx = -nx * 6; b.vy = -ny * 6; b.inAir = true;
+                        gs.tackleCooldown = 800;
+                        spawnParticles(p1.x, p1.y, '#ffd700', 20, 6);
+                        showFlash('🔥 YIKILDI!', '#ffd700');
+                    }
+                }
+            }
+
+            // Auto-pickup: only when ball is free AND nearly stationary (prevents catching a thrown/passed ball)
+            const ballSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+            if (ballSpeed < 2) {
+                ['p1', 'p2'].forEach(pid => {
+                    const p = gs.players[pid];
+                    if (b.holder === null && !b.lobMode && p.frozenTimer <= 0) {
+                        const bx = b.x - p.x, by = b.y - p.y;
+                        if (Math.sqrt(bx * bx + by * by) < p.r + BALL_R) {
+                            b.holder = pid;
+                            b.vx = 0; b.vy = 0;
+                            b.inAir = false;
+                            spawnParticles(p.x, p.y, p.color, 6, 2);
+                        }
+                    }
+                });
+            }
+
+            // Freeze projectile
+            if (gs.freezeProjectile) {
+                const fp = gs.freezeProjectile;
+                fp.x += fp.vx;
+                fp.y += fp.vy;
+                fp.life--;
+
+                const targetPid = fp.owner === 'p1' ? 'p2' : 'p1';
+                const target = gs.players[targetPid];
+                const fdx = fp.x - target.x, fdy = fp.y - target.y;
+                if (Math.sqrt(fdx * fdx + fdy * fdy) < target.r + 6) {
+                    target.frozenTimer = 2000;
+                    if (gs.ball.holder === targetPid) {
+                        gs.ball.holder = null;
+                        gs.ball.vx = targetPid === 'p1' ? -2 : 2; gs.ball.vy = 0;
+                    }
+                    spawnParticles(target.x, target.y, '#88eeff', 25, 5);
+                    showFlash('🧊 DONDU!', '#88eeff');
+                    gs.freezeProjectile = null;
+                }
+
+                if (fp && (fp.life <= 0 || fp.x < FIELD_LEFT || fp.x > FIELD_RIGHT || fp.y < FIELD_TOP || fp.y > FIELD_BOTTOM)) {
+                    gs.freezeProjectile = null;
+                }
+            }
+
+            // Hook projectile
+            if (gs.hookProjectile) {
+                const hp = gs.hookProjectile;
+                hp.x += hp.vx;
+                hp.y += hp.vy;
+                hp.life--;
+
+                const targetPid = hp.owner === 'p1' ? 'p2' : 'p1';
+                const target = gs.players[targetPid];
+                const owner = gs.players[hp.owner];
+                const hdx = hp.x - target.x, hdy = hp.y - target.y;
+                if (Math.sqrt(hdx * hdx + hdy * hdy) < target.r + 6) {
+                    target.pullingTimer = 800; // Skill duration
+                    target.pulledBy = hp.owner;
+                    // If target was holding the ball, they might lose it
+                    if (gs.ball.holder === targetPid) {
+                        gs.ball.holder = null;
+                        gs.ball.vx = (owner.x - target.x) * 0.05;
+                        gs.ball.vy = (owner.y - target.y) * 0.05;
+                    }
+                    spawnParticles(target.x, target.y, '#ffaa33', 20, 5);
+                    showFlash('🪝 YAKALANDI!', '#ffaa33');
+                    gs.hookProjectile = null;
+                }
+
+                if (hp && (hp.life <= 0 || hp.x < FIELD_LEFT || hp.x > FIELD_RIGHT || hp.y < FIELD_TOP || hp.y > FIELD_BOTTOM)) {
+                    gs.hookProjectile = null;
+                }
+            }
+
+            // Update slow orbs
+            for (let i = gs.slowOrbProjectiles.length - 1; i >= 0; i--) {
+                const orb = gs.slowOrbProjectiles[i];
+                orb.progress += 0.025;
+                if (orb.progress >= 1) {
+                    gs.slowZones.push({
+                        x: orb.targetX, y: orb.targetY,
+                        radius: 110, life: orb.duration, owner: orb.owner
+                    });
+                    spawnParticles(orb.targetX, orb.targetY, '#33ffaa', 30, 6);
+                    showFlash('🔮 ALAN OLUŞTU!', '#33ffaa');
+                    gs.slowOrbProjectiles.splice(i, 1);
+                } else {
+                    const t = orb.progress;
+                    const mx = (orb.startX + orb.targetX) / 2;
+                    const my = Math.min(orb.startY, orb.targetY) - 150;
+                    orb.x = (1 - t) * (1 - t) * orb.startX + 2 * (1 - t) * t * mx + t * t * orb.targetX;
+                    orb.y = (1 - t) * (1 - t) * orb.startY + 2 * (1 - t) * t * my + t * t * orb.targetY;
+                }
+            }
+
+            // Update slow zones
+            gs.slowZones = gs.slowZones.filter(z => { z.life -= dt; return z.life > 0; });
+
+            // Update smoke orbs
+            for (let i = gs.smokeProjectiles.length - 1; i >= 0; i--) {
+                const orb = gs.smokeProjectiles[i];
+                orb.progress += 0.022; // slightly different speed
+                if (orb.progress >= 1) {
+                    gs.smokeZones.push({
+                        x: orb.targetX, y: orb.targetY,
+                        radius: 145, life: orb.duration, owner: orb.owner
+                    });
+                    spawnParticles(orb.targetX, orb.targetY, '#fff', 30, 8);
+                    gs.smokeProjectiles.splice(i, 1);
+                } else {
+                    const t = orb.progress;
+                    orb.x = orb.startX + (orb.targetX - orb.startX) * t;
+                    orb.y = orb.startY + (orb.targetY - orb.startY) * t;
+                }
+            }
+            // Update smoke zones
+            gs.smokeZones = gs.smokeZones.filter(z => { z.life -= dt; return z.life > 0; });
+
+            // Ball hits clone -> Teleportation (Substitution Jutsu)
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                const opp = gs.players[pid === 'p1' ? 'p2' : 'p1'];
+                if (b.holder === null && !b.lobMode && p.clones.length > 0 && p.frozenTimer <= 0) {
+                    for (let i = 0; i < p.clones.length; i++) {
+                        const c = p.clones[i];
+                        const distX = b.x - c.x;
+                        const distY = b.y - c.y;
+                        if (Math.sqrt(distX * distX + distY * distY) < p.r + BALL_R + 8) {
+                            // Swap Player and the Clone
+                            const oldX = p.x;
+                            const oldY = p.y;
+                            p.x = c.x;
+                            p.y = c.y;
+                            c.x = oldX;
+                            c.y = oldY;
+
+                            // Player catches the ball
+                            b.holder = pid;
+                            b.vx = 0;
+                            b.vy = 0;
+                            b.inAir = false;
+
+                            spawnParticles(p.x, p.y, '#ffffff', 40, 8);
+                            showFlash('💫 YER DEĞİŞTİRME!', p.color);
+                            break;
+                        }
+                    }
+                }
+
+                // Clone vs Opponent collision — pop fake clone on touch
+                p.clones = p.clones.filter(c => {
+                    const cdx = opp.x - c.x, cdy = opp.y - c.y;
+                    if (Math.sqrt(cdx * cdx + cdy * cdy) < p.r + opp.r + 2) {
+                        spawnParticles(c.x, c.y, p.color, 18, 5);
+                        showFlash('👻 HAYALET!', p.color);
+                        return false;
+                    }
+                    return true;
+                });
+            });
+        }
+
+        function checkGoal() {
+            const b = gs.ball;
+
+            // Penalty mode: detect if shot entered the goal
+            if (gs.penaltyMode && gs.penaltyMode.shot && gs.penaltyMode.active) {
+                const pm = gs.penaltyMode;
+                // If ball crossed the goal line
+                const crossed = pm.keeper === 'p1' ? (b.x < pm.goalX) : (b.x > pm.goalX);
+                if (crossed) {
+                    const hit = Math.abs(b.y - pm.goalY) < pm.goalH / 2;
+                    if (hit) {
+                        endPenaltyMode(pm.kicker);
+                    } else {
+                        endPenaltyMode(null);
+                    }
+                    return;
+                }
+                // If ball went out of bounds or stopped
+                if (b.x < FIELD_LEFT || b.x > FIELD_RIGHT || b.y < FIELD_TOP || b.y > FIELD_BOTTOM || (Math.abs(b.vx) < 0.5 && Math.abs(b.vy) < 0.5)) {
+                    endPenaltyMode(null);
+                    return;
+                }
+                return;
+            }
+            if (gs.penaltyMode) return;
+
+            // SAYIM KURALI: sadece topla birlikte end zone'a giren oyuncu sayı yapabilir
+            let scorer = null;
+
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                if (b.holder === pid) {
+                    if (pid === 'p1' && p.x > PLAY_RIGHT) scorer = 'p1';
+                    if (pid === 'p2' && p.x < PLAY_LEFT) scorer = 'p2';
+                }
+            });
+
+            // Serbest top end zone çizgisine girerse geri sektirilir (sayı olmaz)
+            if (b.holder === null && !b.lobMode) {
+                if (b.x - BALL_R < PLAY_LEFT) { b.x = PLAY_LEFT + BALL_R; b.vx = Math.abs(b.vx) * 0.75; }
+                if (b.x + BALL_R > PLAY_RIGHT) { b.x = PLAY_RIGHT - BALL_R; b.vx = -Math.abs(b.vx) * 0.75; }
+            }
+
+            if (scorer) {
+                const idx = scorer === 'p1' ? 0 : 1;
+                gs.score[idx]++;
+                spawnParticles(W / 2, H / 2, scorer === 'p1' ? '#00d4ff' : '#ff4d6d', 60, 8);
+                showFlash(scorer === 'p1' ? '🔵 GOL! +1' : '🔴 GOL! +1', scorer === 'p1' ? '#00d4ff' : '#ff4d6d');
+                document.getElementById(`score-${scorer}`).textContent = gs.score[idx];
+
+                if (gs.score[idx] >= 5) {
+                    endGame(scorer);
+                    return;
+                }
+                resetRound();
+            }
+        }
+
+        function resetRound() {
+            const b = gs.ball;
+            b.x = W / 2; b.y = H / 2;
+            b.vx = 0; b.vy = 0;
+            b.holder = null;
+            b.inAir = false;
+            b.lobMode = false;
+            b.frozenTimer = 0;
+
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                p.x = pid === 'p1' ? PLAY_LEFT + 60 : PLAY_RIGHT - 60;
+                p.y = H / 2;
+                p.frozenTimer = 0;
+                p.poweredTimer = 0;
+                p.slideTimer = 0;
+                p.selfPassCdLeft = 0;
+                p.lobCharging = false;
+                p.lobChargeTimer = 0;
+                p.slowOrbCharging = false;
+                p.slowOrbChargeTimer = 0;
+                p.smokeCharging = false;
+                p.smokeChargeTimer = 0;
+                p.growTimer = 0;
+                p.shrinkTimer = 0;
+                p.pullingTimer = 0;
+                p.pulledBy = null;
+                p.r = PLAYER_R;
+                p.clones = [];
+                p.controlsReversedTimer = 0;
+            });
+
+            gs.freezeProjectile = null;
+            gs.hookProjectile = null;
+            gs.slowOrbProjectiles = [];
+            gs.slowZones = [];
+            gs.smokeProjectiles = [];
+            gs.smokeZones = [];
+            gs.foulAttempts = { p1: 0, p2: 0 };
+            gs.penaltyMode = null;
+        }
+
+        function endGame(winner) {
+            gameOver = true;
+            gameRunning = false;
+            clearInterval(gs.timerInterval);
+
+            setTimeout(() => {
+                const overlay = document.getElementById('overlay');
+                const h2 = overlay.querySelector('h2');
+                const sub = overlay.querySelector('.subtitle');
+                const btn = document.getElementById('start-btn');
+                h2.textContent = winner === 'p1' ? '🔵 OYUNCU 1 KAZANDI!' : '🔴 OYUNCU 2 KAZANDI!';
+                h2.style.color = winner === 'p1' ? '#00d4ff' : '#ff4d6d';
+                sub.textContent = `Skor: ${gs.score[0]} — ${gs.score[1]}`;
+                btn.textContent = 'YENİDEN OYNA';
+                overlay.classList.remove('hidden');
+            }, 1200);
+        }
+
+        // ─────────────── DRAW ───────────────
+        function drawField() {
+            // Background
+            ctx.fillStyle = '#0d1f12';
+            ctx.fillRect(0, 0, W, H);
+
+            // Field
+            const grad = ctx.createLinearGradient(FIELD_LEFT, 0, FIELD_RIGHT, 0);
+            grad.addColorStop(0, '#0d2818');
+            grad.addColorStop(0.5, '#0f3318');
+            grad.addColorStop(1, '#0d2818');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.roundRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, 12);
+            ctx.fill();
+
+            // Yard lines
+            ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+            ctx.lineWidth = 1;
+            for (let x = PLAY_LEFT + 60; x < PLAY_RIGHT; x += 60) {
+                ctx.beginPath();
+                ctx.moveTo(x, FIELD_TOP);
+                ctx.lineTo(x, FIELD_BOTTOM);
+                ctx.stroke();
+            }
+
+            // Center line
+            ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 8]);
+            ctx.beginPath();
+            ctx.moveTo(W / 2, FIELD_TOP);
+            ctx.lineTo(W / 2, FIELD_BOTTOM);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Center circle
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(W / 2, H / 2, 50, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // P1 End Zone (Left)
+            ctx.fillStyle = 'rgba(0, 212, 255, 0.08)';
+            ctx.fillRect(FIELD_LEFT, FIELD_TOP, END_ZONE_W, FIELD_BOTTOM - FIELD_TOP);
+            ctx.strokeStyle = 'rgba(0,212,255,0.35)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(PLAY_LEFT, FIELD_TOP);
+            ctx.lineTo(PLAY_LEFT, FIELD_BOTTOM);
+            ctx.stroke();
+
+            // P2 End Zone (Right)
+            ctx.fillStyle = 'rgba(255, 77, 109, 0.08)';
+            ctx.fillRect(PLAY_RIGHT, FIELD_TOP, END_ZONE_W, FIELD_BOTTOM - FIELD_TOP);
+            ctx.strokeStyle = 'rgba(255,77,109,0.35)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(PLAY_RIGHT, FIELD_TOP);
+            ctx.lineTo(PLAY_RIGHT, FIELD_BOTTOM);
+            ctx.stroke();
+
+            // End zone labels
+            ctx.save();
+            ctx.translate(FIELD_LEFT + END_ZONE_W / 2, H / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillStyle = 'rgba(0,212,255,0.35)';
+            ctx.font = 'bold 12px Orbitron, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('P1 GÖL', 0, 0);
+            ctx.restore();
+
+            ctx.save();
+            ctx.translate(PLAY_RIGHT + END_ZONE_W / 2, H / 2);
+            ctx.rotate(Math.PI / 2);
+            ctx.fillStyle = 'rgba(255,77,109,0.35)';
+            ctx.font = 'bold 12px Orbitron, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('P2 GÖL', 0, 0);
+            ctx.restore();
+
+            // ── PENALTY GOAL ──
+            if (gs.penaltyMode && gs.penaltyMode.active) {
+                const pm = gs.penaltyMode;
+                const gx = pm.goalX;
+                const gy = pm.goalY;
+                const gh = pm.goalH;
+                const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+
+                ctx.save();
+                // Glow
+                ctx.shadowColor = '#ffaa00';
+                ctx.shadowBlur = 30 * pulse;
+                // Goal posts (American football style)
+                ctx.strokeStyle = `rgba(255,170,0,${0.8 + 0.2 * pulse})`;
+                ctx.lineWidth = 5;
+                // Crossbar
+                ctx.beginPath();
+                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy - gh / 2);
+                ctx.lineTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy + gh / 2);
+                ctx.stroke();
+                // Top post
+                ctx.beginPath();
+                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy - gh / 2);
+                ctx.lineTo(pm.keeper === 'p1' ? gx - 40 : gx + 40, gy - gh / 2 - 30);
+                ctx.stroke();
+                // Bottom post
+                ctx.beginPath();
+                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy + gh / 2);
+                ctx.lineTo(pm.keeper === 'p1' ? gx - 40 : gx + 40, gy + gh / 2 + 30);
+                ctx.stroke();
+                // Fill zone
+                ctx.globalAlpha = 0.15 * pulse;
+                ctx.fillStyle = '#ffaa00';
+                ctx.fillRect(
+                    pm.keeper === 'p1' ? FIELD_LEFT : gx,
+                    gy - gh / 2,
+                    pm.keeper === 'p1' ? gx - FIELD_LEFT : FIELD_RIGHT - gx,
+                    gh
+                );
+                ctx.globalAlpha = 1;
+                // Label
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#ffaa00';
+                ctx.font = 'bold 14px Orbitron, monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('PENALTİ KALE', gx, gy - gh / 2 - 40);
+                ctx.restore();
+            }
+
+            // Field border
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, 12);
+            ctx.stroke();
+        }
+
+        // Helper: draw a single player body at position (x,y) with given style
+        function drawPlayerBody(x, y, r, color, frozenTimer, poweredTimer, label, slideTimer, slideVx, slideVy, pid) {
+            ctx.save();
+            let glowColor = color;
+            let glowSize = 20;
+            if (poweredTimer > 0) { glowColor = '#ffd700'; glowSize = 35; }
+            if (frozenTimer > 0) { glowColor = '#88eeff'; glowSize = 25; }
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = glowSize;
+
+            if (frozenTimer > 0) ctx.fillStyle = '#88eeff';
+            else if (poweredTimer > 0) ctx.fillStyle = '#ffd700';
+            else ctx.fillStyle = color;
+
+            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(x, y, Math.max(0, r - 4), 0, Math.PI * 2); ctx.stroke();
+
+            // Slide trail
+            if (slideTimer > 0) {
+                ctx.globalAlpha = 0.4;
+                ctx.fillStyle = pid === 'p1' ? '#aa00ff' : '#ff88bb';
+                ctx.beginPath(); ctx.arc(x - slideVx * 3, y - slideVy * 3, r * 0.7, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 0.2;
+                ctx.beginPath(); ctx.arc(x - slideVx * 6, y - slideVy * 6, r * 0.5, 0, Math.PI * 2); ctx.fill();
+            }
+
+            ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Orbitron, monospace';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(label, x, y);
+
+            if (frozenTimer > 0) {
+                ctx.globalAlpha = 0.5; ctx.fillStyle = '#88eeff';
+                ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 1; ctx.fillStyle = '#fff'; ctx.font = '14px serif';
+                ctx.fillText('❄', x, y - (r + 10));
+            }
+            if (poweredTimer > 0) {
+                const pulse = 0.3 + 0.3 * Math.sin(Date.now() / 80);
+                ctx.globalAlpha = pulse; ctx.fillStyle = '#ffd700';
+                ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 20;
+                ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+            ctx.restore();
+        }
+
+        function drawPlayer(pid) {
+            const p = gs.players[pid];
+            const label = pid === 'p1' ? 'P1' : 'P2';
+
+            // Hide keeper during penalty
+            if (gs.penaltyMode && gs.penaltyMode.active && pid === gs.penaltyMode.keeper) return;
+
+            if (p.clones.length > 0) {
+                // Build list of all 3 bodies (2 clones + real) and shuffle draw order
+                // so Z-order doesn't give away which is real
+                const bodies = [
+                    { x: p.x, y: p.y, real: true },
+                    ...p.clones.map(c => ({ x: c.x, y: c.y, real: false })),
+                ];
+                // Fisher-Yates shuffle using a stable per-frame seed
+                const seed = Math.floor(Date.now() / 200); // changes every 200ms
+                bodies.sort((a, b) => Math.sin(seed + (a.real ? 1 : 0)) - 0.5);
+
+                bodies.forEach(b => {
+                    drawPlayerBody(b.x, b.y, p.r, p.color, p.frozenTimer, p.poweredTimer, label, p.slideTimer, p.slideVx, p.slideVy, pid);
+                });
+                // Controls-reversed indicator (only on real)
+                if (p.controlsReversedTimer > 0) {
+                    ctx.save(); ctx.fillStyle = '#ff88bb'; ctx.font = '13px serif';
+                    ctx.textAlign = 'center'; ctx.fillText('🔀', p.x, p.y - 28); ctx.restore();
+                }
+                return; // skip standard draw below
+            }
+
+            // Standard draw for non-clone mode
+            drawPlayerBody(p.x, p.y, p.r, p.color, p.frozenTimer, p.poweredTimer, label, p.slideTimer, p.slideVx, p.slideVy, pid);
+
+            // Controls-reversed indicator
+            if (p.controlsReversedTimer > 0) {
+                ctx.save(); ctx.fillStyle = '#ff88bb'; ctx.font = '13px serif';
+                ctx.textAlign = 'center'; ctx.fillText('🔀', p.x, p.y - 28); ctx.restore();
+            }
+        }
+
+        function drawBall() {
+            const b = gs.ball;
+
+            ctx.save();
+
+            // Lob landing shadow
+            if (b.lobMode) {
+                const shadowScale = 0.4 + 0.6 * b.lobProgress;
+                ctx.globalAlpha = 0.2 * (1 - Math.abs(b.lobProgress - 0.5) * 2);
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.ellipse(b.lobTo.x, b.lobTo.y, BALL_R * 1.5 * shadowScale, BALL_R * 0.6 * shadowScale, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+
+            // Holder ring — colored outline around ball showing who owns it
+            const lobScale = b.lobMode ? (1 + 0.5 * Math.sin(b.lobProgress * Math.PI)) : 1;
+            const effectiveR = BALL_R * lobScale;
+
+            if (b.holder === 'p1') {
+                // Pulsing ownership ring
+                const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
+                ctx.shadowColor = '#00d4ff';
+                ctx.shadowBlur = 18 * pulse;
+                ctx.strokeStyle = '#00d4ff';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, effectiveR + 4, 0, Math.PI * 2);
+                ctx.stroke();
+            } else if (b.holder === 'p2') {
+                const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
+                ctx.shadowColor = '#ff4d6d';
+                ctx.shadowBlur = 18 * pulse;
+                ctx.strokeStyle = '#ff4d6d';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, effectiveR + 4, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Ball glow
+            ctx.shadowColor = '#ffee00';
+            ctx.shadowBlur = b.holder ? 12 : 25;
+
+            // Ball body
+            const ballGrad = ctx.createRadialGradient(b.x - 3, b.y - 3, 1, b.x, b.y, effectiveR);
+            ballGrad.addColorStop(0, '#fff8cc');
+            ballGrad.addColorStop(0.4, '#ffcc00');
+            ballGrad.addColorStop(1, '#cc7700');
+            ctx.fillStyle = ballGrad;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, effectiveR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Ball outline
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(255,238,0,0.8)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, effectiveR, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Ball laces
+            ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(b.x, b.y - effectiveR * 0.5);
+            ctx.lineTo(b.x, b.y + effectiveR * 0.5);
+            ctx.stroke();
+            // Horizontal lace lines
+            [-0.2, 0, 0.2].forEach(offs => {
+                ctx.beginPath();
+                ctx.moveTo(b.x - effectiveR * 0.3, b.y + offs * effectiveR);
+                ctx.lineTo(b.x + effectiveR * 0.3, b.y + offs * effectiveR);
+                ctx.stroke();
+            });
+
+            ctx.restore();
+
+            // Decoy balls on clones: if player holds the ball and has clones,
+            // draw identical-looking balls at each clone position
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                if (b.holder === pid && p.clones && p.clones.length > 0) {
+                    p.clones.forEach(c => {
+                        const cx = c.x + p.lastDirX * (PLAYER_R * 0.7);
+                        const cy = c.y + p.lastDirY * (PLAYER_R * 0.7);
+                        ctx.save();
+                        // Same pulsing ownership ring as real ball
+                        const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
+                        ctx.shadowColor = p.color; ctx.shadowBlur = 18 * pulse;
+                        ctx.strokeStyle = p.color; ctx.lineWidth = 3;
+                        ctx.beginPath(); ctx.arc(cx, cy, BALL_R + 4, 0, Math.PI * 2); ctx.stroke();
+                        // Ball body
+                        ctx.shadowColor = '#ffee00'; ctx.shadowBlur = 12;
+                        const fg = ctx.createRadialGradient(cx - 3, cy - 3, 1, cx, cy, BALL_R);
+                        fg.addColorStop(0, '#fff8cc'); fg.addColorStop(0.4, '#ffcc00'); fg.addColorStop(1, '#cc7700');
+                        ctx.fillStyle = fg;
+                        ctx.beginPath(); ctx.arc(cx, cy, BALL_R, 0, Math.PI * 2); ctx.fill();
+                        ctx.shadowBlur = 0;
+                        ctx.strokeStyle = 'rgba(255,238,0,0.8)'; ctx.lineWidth = 1.5;
+                        ctx.beginPath(); ctx.arc(cx, cy, BALL_R, 0, Math.PI * 2); ctx.stroke();
+                        ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1.5;
+                        ctx.beginPath(); ctx.moveTo(cx, cy - BALL_R * 0.5); ctx.lineTo(cx, cy + BALL_R * 0.5); ctx.stroke();
+                        [-0.2, 0, 0.2].forEach(o => {
+                            ctx.beginPath();
+                            ctx.moveTo(cx - BALL_R * 0.3, cy + o * BALL_R);
+                            ctx.lineTo(cx + BALL_R * 0.3, cy + o * BALL_R);
+                            ctx.stroke();
+                        });
+                        ctx.restore();
+                    });
+                }
+            });
+        }
+
+        function drawFreezeProjectile() {
+            if (!gs.freezeProjectile) return;
+            const fp = gs.freezeProjectile;
+            ctx.save();
+            ctx.shadowColor = '#88eeff';
+            ctx.shadowBlur = 20;
+            ctx.fillStyle = '#88eeff';
+            ctx.beginPath();
+            ctx.arc(fp.x, fp.y, 7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawHook() {
+            // Flying hook
+            if (gs.hookProjectile) {
+                const hp = gs.hookProjectile;
+                const owner = gs.players[hp.owner];
+                ctx.save();
+                // Rope
+                ctx.strokeStyle = '#ffaa33';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(owner.x, owner.y);
+                ctx.lineTo(hp.x, hp.y);
+                ctx.stroke();
+                // Hook head
+                ctx.setLineDash([]);
+                ctx.shadowColor = '#ffaa33';
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = '#ffaa33';
+                ctx.beginPath();
+                ctx.arc(hp.x, hp.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+            // Active pulling rope
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                if (p.pullingTimer > 0 && p.pulledBy) {
+                    const owner = gs.players[p.pulledBy];
+                    ctx.save();
+                    ctx.strokeStyle = '#ffaa33';
+                    ctx.lineWidth = 4;
+                    ctx.setLineDash([10, 5]);
+                    ctx.lineDashOffset = -Date.now() * 0.02;
+                    ctx.beginPath();
+                    ctx.moveTo(owner.x, owner.y);
+                    ctx.lineTo(p.x, p.y);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            });
+        }
+
+        function drawSlowZones() {
+            gs.slowZones.forEach(z => {
+                ctx.save();
+                ctx.globalAlpha = Math.min(1, z.life / 500) * 0.4;
+                ctx.beginPath();
+                ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#33ffaa';
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#fff';
+                ctx.stroke();
+
+                ctx.globalAlpha *= 0.5;
+                ctx.clip();
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctx.lineWidth = 1;
+                for (let i = z.x - z.radius; i < z.x + z.radius; i += 20) {
+                    ctx.beginPath(); ctx.moveTo(i, z.y - z.radius); ctx.lineTo(i + 20, z.y + z.radius); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(i, z.y + z.radius); ctx.lineTo(i + 20, z.y - z.radius); ctx.stroke();
+                }
+                ctx.restore();
+            });
+
+            gs.slowOrbProjectiles.forEach(orb => {
+                ctx.save();
+                const t = orb.progress;
+                const size = 8 + Math.sin(t * Math.PI) * 8; // pulse
+                ctx.shadowColor = '#33ffaa';
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = '#33ffaa';
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, size * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        function drawSmokeZones() {
+            gs.smokeZones.forEach(z => {
+                ctx.save();
+                const lifeAlpha = Math.min(1, z.life / 800);
+                for (let i = 0; i < 6; i++) {
+                    const angle = (i / 6) * Math.PI * 2 + Date.now() * 0.001 + i;
+                    const ox = Math.cos(angle) * (z.radius * 0.25);
+                    const oy = Math.sin(angle) * (z.radius * 0.25);
+                    const grad = ctx.createRadialGradient(z.x + ox, z.y + oy, 0, z.x + ox, z.y + oy, z.radius);
+                    grad.addColorStop(0, `rgba(220, 220, 220, ${0.98 * lifeAlpha})`);
+                    grad.addColorStop(0.5, `rgba(180, 180, 180, ${0.85 * lifeAlpha})`);
+                    grad.addColorStop(1, 'rgba(120, 120, 120, 0)');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(z.x + ox, z.y + oy, z.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            });
+            gs.smokeProjectiles.forEach(orb => {
+                ctx.save();
+                const t = orb.progress;
+                const size = 12 + Math.sin(t * Math.PI) * 12;
+                ctx.shadowColor = '#fff'; ctx.shadowBlur = 20;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(orb.x, orb.y, size, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        function drawPenaltyBar() {
+            const pm = gs.penaltyMode;
+            if (!pm || !pm.active) return;
+
+            const BAR_W = Math.min(W * 0.6, 500);
+            const BAR_H = 28;
+            const BAR_X = (W - BAR_W) / 2;
+            const BAR_Y = H - 80;
+            const CORNER = 8;
+
+            ctx.save();
+
+            // Background panel
+            ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            ctx.beginPath();
+            ctx.roundRect(BAR_X - 20, BAR_Y - 38, BAR_W + 40, BAR_H + 58, 12);
+            ctx.fill();
+
+            // Title
+            const kickerColor = pm.kicker === 'p1' ? '#00d4ff' : '#ff4d6d';
+            ctx.fillStyle = kickerColor;
+            ctx.font = 'bold 13px Orbitron, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(
+                (pm.kicker === 'p1' ? '🔵 P1' : '🔴 P2') + ' PENALTİ — Vurmak için [SPACE] bas!',
+                W / 2, BAR_Y - 14
+            );
+
+            // Red bar background
+            ctx.fillStyle = '#cc2222';
+            ctx.beginPath();
+            ctx.roundRect(BAR_X, BAR_Y, BAR_W, BAR_H, CORNER);
+            ctx.fill();
+
+            // Green zone
+            const gx = BAR_X + pm.greenStart * BAR_W;
+            const gw = pm.greenWidth * BAR_W;
+            ctx.fillStyle = '#00cc55';
+            ctx.beginPath();
+            ctx.roundRect(gx, BAR_Y, gw, BAR_H, 4);
+            ctx.fill();
+
+            // Green zone glow
+            ctx.shadowColor = '#00ff88';
+            ctx.shadowBlur = 12;
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(gx, BAR_Y, gw, BAR_H, 4);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Indicator (needle)
+            const needleX = BAR_X + pm.barPos * BAR_W;
+            const inGreen = pm.barPos >= pm.greenStart && pm.barPos <= pm.greenStart + pm.greenWidth;
+            ctx.fillStyle = pm.shot ? (inGreen ? '#00ff88' : '#ffffff') : '#ffffff';
+            ctx.shadowColor = pm.shot && inGreen ? '#00ff88' : '#fff';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.moveTo(needleX, BAR_Y - 6);
+            ctx.lineTo(needleX + 7, BAR_Y + BAR_H + 6);
+            ctx.lineTo(needleX - 7, BAR_Y + BAR_H + 6);
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Bar border
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(BAR_X, BAR_Y, BAR_W, BAR_H, CORNER);
+            ctx.stroke();
+
+            // Fouler hint
+            const foulerKey = pm.keeper === 'p1' ? 'F' : 'L';
+            ctx.fillStyle = 'rgba(255,100,100,0.8)';
+            ctx.font = '11px Orbitron, monospace';
+            ctx.fillText(
+                '⚡ ' + (pm.keeper === 'p1' ? 'P1' : 'P2') + ': [' + foulerKey + '] bas → hızı artır!',
+                W / 2, BAR_Y + BAR_H + 18
+            );
+
+            ctx.restore();
+        }
+
+        // ─────────────── MAIN LOOP ───────────────
+        let lastTime = 0;
+        function gameLoop(ts) {
+            if (!gameRunning) return;
+            const dt = Math.min(ts - lastTime, 50);
+            lastTime = ts;
+
+            pollGamepadActions();
+
+            // Update
+            updatePlayer('p1', dt);
+            updatePlayer('p2', dt);
+            updateBall(dt);
+            updatePenaltyBar(dt);
+            checkCollisions(dt);
+            checkGoal();
+            updateParticles(dt);
+            updateHUD(dt);
+
+            // Draw — players first, ball on top so it's always visible
+            drawField();
+            drawSlowZones();
+            drawFreezeProjectile();
+            drawHook();
+            drawPlayer('p1');
+            drawPlayer('p2');
+            drawBall();
+            drawSmokeZones();
+            drawParticles();
+            drawPenaltyBar();
+
+            animId = requestAnimationFrame(gameLoop);
+        }
+
+        // ─────────────── START/RESTART ───────────────
+        function startGame() {
+            document.getElementById('overlay').classList.add('hidden');
+            initSkillSelection();
+        }
+
+        function initSkillSelection() {
+            document.getElementById('skill-selection-overlay').classList.remove('hidden');
+            p1SelectedSkills = [];
+            p2SelectedSkills = [];
+
+            const p1Pool = document.getElementById('p1-skill-pool');
+            const p2Pool = document.getElementById('p2-skill-pool');
+            p1Pool.innerHTML = ''; p2Pool.innerHTML = '';
+
+            ALL_SKILLS.forEach(sk => {
+                const p1Card = document.createElement('div');
+                p1Card.className = 'skill-card';
+                p1Card.style.color = sk.color;
+                p1Card.innerHTML = `<div class="skill-icon">${sk.icon}</div><div class="skill-name">${sk.name}</div>`;
+                p1Card.onclick = () => toggleSkill('p1', sk, p1Card);
+                p1Pool.appendChild(p1Card);
+
+                const p2Card = document.createElement('div');
+                p2Card.className = 'skill-card';
+                p2Card.style.color = sk.color;
+                p2Card.innerHTML = `<div class="skill-icon">${sk.icon}</div><div class="skill-name">${sk.name}</div>`;
+                p2Card.onclick = () => toggleSkill('p2', sk, p2Card);
+                p2Pool.appendChild(p2Card);
+            });
+            updateSkillSelectionUI();
+        }
+
+        function toggleSkill(pid, sk, cardEl) {
+            const arr = pid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+            const idx = arr.findIndex(s => s.id === sk.id);
+            if (idx !== -1) {
+                arr.splice(idx, 1);
+                cardEl.classList.remove('selected');
+            } else {
+                if (arr.length >= 3) return;
+                arr.push(sk);
+                cardEl.classList.add('selected');
+            }
+            updateSkillSelectionUI();
+        }
+
+        function updateSkillSelectionUI() {
+            for (let i = 0; i < 3; i++) {
+                const s1 = p1SelectedSkills[i];
+                document.getElementById(`p1-slot-${i}`).innerHTML = s1 ? s1.icon : '';
+                document.getElementById(`p1-slot-${i}`).style.borderColor = s1 ? s1.color : 'rgba(255,255,255,0.3)';
+
+                const s2 = p2SelectedSkills[i];
+                document.getElementById(`p2-slot-${i}`).innerHTML = s2 ? s2.icon : '';
+                document.getElementById(`p2-slot-${i}`).style.borderColor = s2 ? s2.color : 'rgba(255,255,255,0.3)';
+            }
+
+            const btn = document.getElementById('confirm-skills-btn');
+            btn.disabled = (p1SelectedSkills.length < 3 || p2SelectedSkills.length < 3);
+        }
+
+        function confirmSkills() {
+            document.getElementById('skill-selection-overlay').classList.add('hidden');
+            _doStartGame();
+        }
+
+        function _doStartGame() {
+            if (animId) cancelAnimationFrame(animId);
+            if (gs.timerInterval) clearInterval(gs.timerInterval);
+            particles = [];
+            keys = {};
+            gameOver = false;
+            gameRunning = true;
+
+            initState();
+
+            // Assign selected abilities and keys
+            const p1Keys = ['KeyQ', 'KeyE', 'KeyR'];
+            const p2Keys = ['KeyU', 'KeyI', 'KeyO'];
+            gs.players.p1.abilities = p1SelectedSkills.map((sk, i) => ({ ...sk, key: p1Keys[i], cdLeft: 0, active: false }));
+            gs.players.p2.abilities = p2SelectedSkills.map((sk, i) => ({ ...sk, key: p2Keys[i], cdLeft: 0, active: false }));
+
+            buildHUD();
+
+            // Restore overlay content in case of restart
+            const overlay = document.getElementById('overlay');
+            overlay.querySelector('h2').textContent = '⚡ GRID RUSH';
+            overlay.querySelector('h2').style.color = '';
+            document.getElementById('start-btn').textContent = 'YENİDEN OYNA';
+            overlay.classList.add('hidden');
+            // Blur start button so Space key doesn't re-trigger it
+            document.getElementById('start-btn').blur();
+
+            // Timer
+            let timeLeft = 180;
+            document.getElementById('timer-display').textContent = formatTime(timeLeft);
+            gs.timerInterval = setInterval(() => {
+                if (!gameRunning) return;
+                timeLeft--;
+                document.getElementById('timer-display').textContent = formatTime(timeLeft);
+                if (timeLeft <= 0) {
+                    clearInterval(gs.timerInterval);
+                    // Who has more score wins
+                    const winner = gs.score[0] > gs.score[1] ? 'p1' : gs.score[1] > gs.score[0] ? 'p2' : 'draw';
+                    if (winner === 'draw') {
+                        showFlash('⚖️ BERABERE!', '#fff');
+                        setTimeout(() => { endGame('p1'); }, 1500); // show overlay as P1 for draw
+                    } else {
+                        endGame(winner);
+                    }
+                }
+            }, 1000);
+
+            lastTime = performance.now();
+            animId = requestAnimationFrame(gameLoop);
+            showFlash('🏈 BAŞLA!', '#ffffff');
+        } // end _doStartGame
+
+        function formatTime(s) {
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            return `${m}:${sec.toString().padStart(2, '0')}`;
+        }
+
+        // ─────────────── RESIZE & INITIAL DRAW ───────────────
+        // Wait one frame so layout is complete before measuring
+        requestAnimationFrame(() => {
+            resizeGame();
+            initState();
+            buildHUD();
+            drawField();
+
+            // Draw initial ball
+            const b = gs.ball;
+            ctx.save();
+            ctx.shadowColor = '#ffee00';
+            ctx.shadowBlur = 25;
+            const bg = ctx.createRadialGradient(b.x - 3, b.y - 3, 1, b.x, b.y, BALL_R);
+            bg.addColorStop(0, '#fff8cc');
+            bg.addColorStop(0.4, '#ffcc00');
+            bg.addColorStop(1, '#cc7700');
+            ctx.fillStyle = bg;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, BALL_R, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        });
+
+        window.addEventListener('resize', () => {
+            resizeGame();
+            if (!gameRunning) { initState(); buildHUD(); drawField(); }
+        });
+    </script>
+</body>
+
+</html>

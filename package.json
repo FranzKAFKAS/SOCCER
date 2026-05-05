@@ -1,0 +1,17 @@
+{
+  "name": "online-web-oyun",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "tunnel": "npx localtunnel --port 3000"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.22.1",
+    "ws": "^8.20.0"
+  }
+}
