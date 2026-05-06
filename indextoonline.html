@@ -470,39 +470,267 @@
             transform: scale(1.05);
             box-shadow: 0 0 30px rgba(123, 47, 255, 0.8);
         }
+
+        /* ── MAIN MENU STYLES ── */
+        #main-menu {
+            position: absolute;
+            inset: 0;
+            background: #0a0a1a;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            overflow: hidden;
+        }
+
+        #main-menu::before {
+            content: '';
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(123,47,255,0.12) 0%, transparent 70%);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .menu-logo {
+            font-family: 'Orbitron', monospace;
+            font-size: 3.5rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #00d4ff, #7b2fff, #ff4d6d);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 6px;
+            text-align: center;
+            animation: menuPulse 3s ease-in-out infinite;
+        }
+
+        @keyframes menuPulse {
+            0%, 100% { filter: brightness(1); }
+            50% { filter: brightness(1.3); }
+        }
+
+        .menu-tagline {
+            font-family: 'Inter', sans-serif;
+            color: rgba(255,255,255,0.35);
+            font-size: 0.85rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-top: -28px;
+        }
+
+        .mode-cards {
+            display: flex;
+            gap: 28px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .mode-card {
+            width: 240px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 32px 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s, background 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .mode-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            transition: opacity 0.3s;
+            border-radius: 20px;
+        }
+
+        .mode-card.local::before {
+            background: linear-gradient(135deg, rgba(0,255,180,0.08), rgba(0,212,255,0.08));
+        }
+
+        .mode-card.online::before {
+            background: linear-gradient(135deg, rgba(123,47,255,0.1), rgba(255,77,109,0.08));
+        }
+
+        .mode-card:hover::before {
+            opacity: 1;
+        }
+
+        .mode-card.local {
+            border-color: rgba(0,212,255,0.2);
+        }
+
+        .mode-card.local:hover {
+            border-color: rgba(0,212,255,0.7);
+            box-shadow: 0 0 40px rgba(0,212,255,0.25), 0 8px 32px rgba(0,0,0,0.4);
+            transform: translateY(-4px);
+        }
+
+        .mode-card.online {
+            border-color: rgba(123,47,255,0.2);
+        }
+
+        .mode-card.online:hover {
+            border-color: rgba(123,47,255,0.7);
+            box-shadow: 0 0 40px rgba(123,47,255,0.25), 0 8px 32px rgba(0,0,0,0.4);
+            transform: translateY(-4px);
+        }
+
+        .mode-icon {
+            font-size: 3rem;
+            line-height: 1;
+        }
+
+        .mode-title {
+            font-family: 'Orbitron', monospace;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: #fff;
+        }
+
+        .mode-card.local .mode-title { color: #00d4ff; }
+        .mode-card.online .mode-title { color: #7b2fff; }
+
+        .mode-desc {
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.45);
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        .mode-badge {
+            font-family: 'Orbitron', monospace;
+            font-size: 0.6rem;
+            letter-spacing: 1px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            margin-top: 4px;
+        }
+
+        .mode-card.local .mode-badge {
+            background: rgba(0,212,255,0.15);
+            color: #00d4ff;
+            border: 1px solid rgba(0,212,255,0.3);
+        }
+
+        .mode-card.online .mode-badge {
+            background: rgba(123,47,255,0.15);
+            color: #a57fff;
+            border: 1px solid rgba(123,47,255,0.3);
+        }
+
+        /* Lobby (online sub-panel) */
+        #lobby {
+            position: absolute;
+            inset: 0;
+            background: #0a0a1a;
+            z-index: 150;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+        }
+
+        .lobby-back {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-family: 'Orbitron', monospace;
+            font-size: 0.65rem;
+            color: rgba(255,255,255,0.5);
+            cursor: pointer;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+        }
+
+        .lobby-back:hover {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
     </style>
 </head>
 
 <body>
 
-    <div id="lobby"
-        style="position:absolute; inset:0; background:#0a0a1a; z-index:100; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px;">
-        <div class="logo" style="font-family:'Orbitron'; font-size:3rem; font-weight:900; color:#00d4ff;">⚡ GRID RUSH
+    <!-- ── MAIN MENU ── -->
+    <div id="main-menu">
+        <div class="menu-logo">⚡ GRID RUSH</div>
+        <div class="menu-tagline">Amerikan Futbol Arene</div>
+
+        <div class="mode-cards">
+            <!-- Local 2-Player -->
+            <div class="mode-card local" onclick="goLocalMode()" id="local-mode-card">
+                <div class="mode-icon">🎮</div>
+                <div class="mode-title">YEREL OYUN</div>
+                <div class="mode-desc">Tek bilgisayarda<br>2 kişi oyna</div>
+                <div class="mode-badge">WASD vs OKLAR</div>
+            </div>
+
+            <!-- Online -->
+            <div class="mode-card online" onclick="goOnlineMode()" id="online-mode-card">
+                <div class="mode-icon">🌐</div>
+                <div class="mode-title">ONLINE</div>
+                <div class="mode-desc">Farklı bilgisayarlardan<br>arkadaşınla oyna</div>
+                <div class="mode-badge">MULTIPLAYER</div>
+            </div>
         </div>
-        <div style="color:rgba(255,255,255,0.5)">ONLINE MULTIPLAYER</div>
-        <div style="display:flex; gap: 20px;">
+    </div>
+
+    <!-- ── ONLINE LOBBY ── -->
+    <div id="lobby">
+        <button class="lobby-back" onclick="backToMenu()">← GERİ DÖN</button>
+        <div style="font-family:'Orbitron'; font-size:2.5rem; font-weight:900; background:linear-gradient(135deg,#7b2fff,#00d4ff); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">⚡ GRID RUSH</div>
+        <div style="color:rgba(255,255,255,0.4); font-family:'Orbitron'; font-size:0.75rem; letter-spacing:3px;">ONLINE MULTIPLAYER</div>
+
+        <div style="display:flex; flex-direction:column; align-items:center; gap:16px; margin-top:8px;">
             <button onclick="createRoom()"
-                style="padding:16px 32px; font-size:1.2rem; font-family:'Orbitron'; font-weight:700; cursor:pointer; background:linear-gradient(135deg, #7b2fff, #00d4ff); color:#fff; border:none; border-radius:12px; box-shadow:0 0 30px rgba(123,47,255,0.4);">ODA
-                KUR (P1)</button>
+                style="padding:16px 48px; font-size:1.1rem; font-family:'Orbitron'; font-weight:700; cursor:pointer; background:linear-gradient(135deg, #7b2fff, #00d4ff); color:#fff; border:none; border-radius:12px; box-shadow:0 0 30px rgba(123,47,255,0.4); letter-spacing:2px; transition: transform 0.15s, box-shadow 0.15s;"
+                onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 0 50px rgba(123,47,255,0.7)'"
+                onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 0 30px rgba(123,47,255,0.4)'"
+                >ODA KUR (P1)</button>
+
+            <div style="color:rgba(255,255,255,0.25); font-size:0.8rem;">— veya mevcut odaya katıl —</div>
+
+            <div style="display:flex; gap:10px;">
+                <input id="room-code-input" type="text" placeholder="ODA KODU"
+                    style="padding:12px 16px; font-size:1.1rem; font-family:'Orbitron'; text-align:center; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15); color:#fff; border-radius:10px; letter-spacing:4px; width:180px; outline:none;"
+                    oninput="this.value=this.value.toUpperCase()">
+                <button onclick="joinRoom()"
+                    style="padding:12px 24px; font-size:1rem; font-family:'Orbitron'; font-weight:700; cursor:pointer; background:linear-gradient(135deg, #ff4d6d, #7b2fff); color:#fff; border:none; border-radius:10px; letter-spacing:2px;">KATIL</button>
+            </div>
         </div>
-        <div style="color:rgba(255,255,255,0.3)">veya</div>
-        <div style="display:flex; gap:10px;">
-            <input id="room-code-input" type="text" placeholder="KOD GİR"
-                style="padding:12px; font-size:1.2rem; font-family:'Orbitron'; text-align:center; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15); color:#fff; border-radius:10px;">
-            <button onclick="joinRoom()"
-                style="padding:12px 24px; font-size:1.2rem; font-family:'Orbitron'; font-weight:700; cursor:pointer; background:linear-gradient(135deg, #ff4d6d, #7b2fff); color:#fff; border:none; border-radius:10px;">KATIL</button>
-        </div>
-        <div id="error-msg" style="color:#ff4d6d;"></div>
+
+        <div id="error-msg" style="color:#ff4d6d; font-family:'Orbitron'; font-size:0.75rem;"></div>
     </div>
 
     <div id="waiting-room"
         style="display:none; position:absolute; inset:0; background:#0a0a1a; z-index:100; flex-direction:column; align-items:center; justify-content:center; gap:24px;">
-        <div class="logo" style="font-family:'Orbitron'; font-size:3rem; font-weight:900; color:#00d4ff;">⚡ GRID RUSH
-        </div>
+        <button class="lobby-back" onclick="backToMenu()">← GERİ DÖN</button>
+        <div style="font-family:'Orbitron'; font-size:2.5rem; font-weight:900; background:linear-gradient(135deg,#7b2fff,#00d4ff); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">⚡ GRID RUSH</div>
         <div id="display-room-code"
             style="font-family:'Orbitron'; font-size:4rem; font-weight:900; color:#00d4ff; letter-spacing:10px;"></div>
-        <div style="color:rgba(255,255,255,0.5)">Arkadaşın bekleniyor...</div>
+        <div style="color:rgba(255,255,255,0.5); font-family:'Inter'; font-size:0.9rem;">Arkadaşın bekleniyor...</div>
+        <div style="color:rgba(255,255,255,0.25); font-family:'Orbitron'; font-size:0.6rem; letter-spacing:2px;">Bu kodu arkadaşınla paylaş</div>
     </div>
+
 
     <div id="game-wrapper" style="display:none;">
         <div id="title">⚡ GRID RUSH</div>
@@ -2827,6 +3055,33 @@
             if (!gameRunning) { initState(); buildHUD(); drawField(); }
         });
 
+        // --- MENU NAVIGATION ---
+        function goLocalMode() {
+            // Local 2-player mode: simply redirect to index.html
+            window.location.href = 'index.html';
+        }
+
+        function goOnlineMode() {
+            document.getElementById('main-menu').style.display = 'none';
+            const lobby = document.getElementById('lobby');
+            lobby.style.display = 'flex';
+            // Initialize socket connection when entering online mode
+            if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+                initSocket();
+            }
+        }
+
+        function backToMenu() {
+            // Close socket if open
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('waiting-room').style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
+            document.getElementById('error-msg').textContent = '';
+        }
+
         // --- ONLINE LOGIC ---
         const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
         let socket, myPid, myRoomId, allSkills = [], gameStarted = false;
@@ -2972,8 +3227,8 @@
             requestAnimationFrame(gameLoop);
         };
 
-        // Initialize socket
-        initSocket();
+        // Do NOT auto-init socket - only init when user picks online mode
+        // initSocket(); // removed
 
         // Override local event listeners for actions
         window.addEventListener('keydown', e => {
