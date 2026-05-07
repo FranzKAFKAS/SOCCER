@@ -490,7 +490,7 @@
             position: absolute;
             width: 600px;
             height: 600px;
-            background: radial-gradient(circle, rgba(123,47,255,0.12) 0%, transparent 70%);
+            background: radial-gradient(circle, rgba(123, 47, 255, 0.12) 0%, transparent 70%);
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
@@ -511,13 +511,20 @@
         }
 
         @keyframes menuPulse {
-            0%, 100% { filter: brightness(1); }
-            50% { filter: brightness(1.3); }
+
+            0%,
+            100% {
+                filter: brightness(1);
+            }
+
+            50% {
+                filter: brightness(1.3);
+            }
         }
 
         .menu-tagline {
             font-family: 'Inter', sans-serif;
-            color: rgba(255,255,255,0.35);
+            color: rgba(255, 255, 255, 0.35);
             font-size: 0.85rem;
             letter-spacing: 3px;
             text-transform: uppercase;
@@ -533,8 +540,8 @@
 
         .mode-card {
             width: 240px;
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 20px;
             padding: 32px 24px;
             display: flex;
@@ -557,11 +564,11 @@
         }
 
         .mode-card.local::before {
-            background: linear-gradient(135deg, rgba(0,255,180,0.08), rgba(0,212,255,0.08));
+            background: linear-gradient(135deg, rgba(0, 255, 180, 0.08), rgba(0, 212, 255, 0.08));
         }
 
         .mode-card.online::before {
-            background: linear-gradient(135deg, rgba(123,47,255,0.1), rgba(255,77,109,0.08));
+            background: linear-gradient(135deg, rgba(123, 47, 255, 0.1), rgba(255, 77, 109, 0.08));
         }
 
         .mode-card:hover::before {
@@ -569,22 +576,22 @@
         }
 
         .mode-card.local {
-            border-color: rgba(0,212,255,0.2);
+            border-color: rgba(0, 212, 255, 0.2);
         }
 
         .mode-card.local:hover {
-            border-color: rgba(0,212,255,0.7);
-            box-shadow: 0 0 40px rgba(0,212,255,0.25), 0 8px 32px rgba(0,0,0,0.4);
+            border-color: rgba(0, 212, 255, 0.7);
+            box-shadow: 0 0 40px rgba(0, 212, 255, 0.25), 0 8px 32px rgba(0, 0, 0, 0.4);
             transform: translateY(-4px);
         }
 
         .mode-card.online {
-            border-color: rgba(123,47,255,0.2);
+            border-color: rgba(123, 47, 255, 0.2);
         }
 
         .mode-card.online:hover {
-            border-color: rgba(123,47,255,0.7);
-            box-shadow: 0 0 40px rgba(123,47,255,0.25), 0 8px 32px rgba(0,0,0,0.4);
+            border-color: rgba(123, 47, 255, 0.7);
+            box-shadow: 0 0 40px rgba(123, 47, 255, 0.25), 0 8px 32px rgba(0, 0, 0, 0.4);
             transform: translateY(-4px);
         }
 
@@ -601,12 +608,17 @@
             color: #fff;
         }
 
-        .mode-card.local .mode-title { color: #00d4ff; }
-        .mode-card.online .mode-title { color: #7b2fff; }
+        .mode-card.local .mode-title {
+            color: #00d4ff;
+        }
+
+        .mode-card.online .mode-title {
+            color: #7b2fff;
+        }
 
         .mode-desc {
             font-size: 0.75rem;
-            color: rgba(255,255,255,0.45);
+            color: rgba(255, 255, 255, 0.45);
             text-align: center;
             line-height: 1.6;
         }
@@ -621,15 +633,15 @@
         }
 
         .mode-card.local .mode-badge {
-            background: rgba(0,212,255,0.15);
+            background: rgba(0, 212, 255, 0.15);
             color: #00d4ff;
-            border: 1px solid rgba(0,212,255,0.3);
+            border: 1px solid rgba(0, 212, 255, 0.3);
         }
 
         .mode-card.online .mode-badge {
-            background: rgba(123,47,255,0.15);
+            background: rgba(123, 47, 255, 0.15);
             color: #a57fff;
-            border: 1px solid rgba(123,47,255,0.3);
+            border: 1px solid rgba(123, 47, 255, 0.3);
         }
 
         /* Lobby (online sub-panel) */
@@ -649,20 +661,20 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(255,255,255,0.06);
-            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 8px;
             padding: 8px 16px;
             font-family: 'Orbitron', monospace;
             font-size: 0.65rem;
-            color: rgba(255,255,255,0.5);
+            color: rgba(255, 255, 255, 0.5);
             cursor: pointer;
             letter-spacing: 1px;
             transition: all 0.2s;
         }
 
         .lobby-back:hover {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.1);
             color: #fff;
         }
     </style>
@@ -697,15 +709,18 @@
     <!-- ── ONLINE LOBBY ── -->
     <div id="lobby">
         <button class="lobby-back" onclick="backToMenu()">← GERİ DÖN</button>
-        <div style="font-family:'Orbitron'; font-size:2.5rem; font-weight:900; background:linear-gradient(135deg,#7b2fff,#00d4ff); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">⚡ GRID RUSH</div>
-        <div style="color:rgba(255,255,255,0.4); font-family:'Orbitron'; font-size:0.75rem; letter-spacing:3px;">ONLINE MULTIPLAYER</div>
+        <div
+            style="font-family:'Orbitron'; font-size:2.5rem; font-weight:900; background:linear-gradient(135deg,#7b2fff,#00d4ff); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">
+            ⚡ GRID RUSH</div>
+        <div style="color:rgba(255,255,255,0.4); font-family:'Orbitron'; font-size:0.75rem; letter-spacing:3px;">ONLINE
+            MULTIPLAYER</div>
 
         <div style="display:flex; flex-direction:column; align-items:center; gap:16px; margin-top:8px;">
             <button onclick="createRoom()"
                 style="padding:16px 48px; font-size:1.1rem; font-family:'Orbitron'; font-weight:700; cursor:pointer; background:linear-gradient(135deg, #7b2fff, #00d4ff); color:#fff; border:none; border-radius:12px; box-shadow:0 0 30px rgba(123,47,255,0.4); letter-spacing:2px; transition: transform 0.15s, box-shadow 0.15s;"
                 onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 0 50px rgba(123,47,255,0.7)'"
-                onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 0 30px rgba(123,47,255,0.4)'"
-                >ODA KUR (P1)</button>
+                onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 0 30px rgba(123,47,255,0.4)'">ODA
+                KUR (P1)</button>
 
             <div style="color:rgba(255,255,255,0.25); font-size:0.8rem;">— veya mevcut odaya katıl —</div>
 
@@ -724,11 +739,14 @@
     <div id="waiting-room"
         style="display:none; position:absolute; inset:0; background:#0a0a1a; z-index:100; flex-direction:column; align-items:center; justify-content:center; gap:24px;">
         <button class="lobby-back" onclick="backToMenu()">← GERİ DÖN</button>
-        <div style="font-family:'Orbitron'; font-size:2.5rem; font-weight:900; background:linear-gradient(135deg,#7b2fff,#00d4ff); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">⚡ GRID RUSH</div>
+        <div
+            style="font-family:'Orbitron'; font-size:2.5rem; font-weight:900; background:linear-gradient(135deg,#7b2fff,#00d4ff); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">
+            ⚡ GRID RUSH</div>
         <div id="display-room-code"
             style="font-family:'Orbitron'; font-size:4rem; font-weight:900; color:#00d4ff; letter-spacing:10px;"></div>
         <div style="color:rgba(255,255,255,0.5); font-family:'Inter'; font-size:0.9rem;">Arkadaşın bekleniyor...</div>
-        <div style="color:rgba(255,255,255,0.25); font-family:'Orbitron'; font-size:0.6rem; letter-spacing:2px;">Bu kodu arkadaşınla paylaş</div>
+        <div style="color:rgba(255,255,255,0.25); font-family:'Orbitron'; font-size:0.6rem; letter-spacing:2px;">Bu kodu
+            arkadaşınla paylaş</div>
     </div>
 
 

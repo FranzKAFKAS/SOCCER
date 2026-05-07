@@ -245,6 +245,36 @@
             margin-top: 8px;
         }
 
+        .mode-selector {
+            display: flex;
+            gap: 16px;
+            margin-top: 10px;
+        }
+
+        .mode-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 8px 24px;
+            font-family: 'Orbitron', monospace;
+            font-size: 1rem;
+            color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .mode-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .mode-btn.active {
+            background: rgba(123, 47, 255, 0.3);
+            border-color: #7b2fff;
+            color: #fff;
+            box-shadow: 0 0 15px rgba(123, 47, 255, 0.4);
+        }
+
         .ctrl-box {
             background: rgba(255, 255, 255, 0.04);
             border-radius: 12px;
@@ -523,6 +553,12 @@
                     </div>
                 </div>
 
+                <div class="mode-selector">
+                    <div class="mode-btn active" onclick="setGameMode(1)" id="btn-mode-1">1v1</div>
+                    <div class="mode-btn" onclick="setGameMode(2)" id="btn-mode-2">2v2</div>
+                    <div class="mode-btn" onclick="setGameMode(3)" id="btn-mode-3">3v3</div>
+                </div>
+
                 <button id="start-btn" onclick="startGame()">OYUNU BAŞLAT</button>
                 <div id="controls-hint">
                     <div class="hint-chip">🏈 Topu tut &amp; gol çizgisine ulaş</div>
@@ -560,6 +596,14 @@
     </div>
 
     <script>
+        let gameModeSize = 1;
+        function setGameMode(size) {
+            gameModeSize = size;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-mode-' + size).classList.add('active');
+            resizeGame();
+        }
+
         // ─────────────── CANVAS & CONTEXT ───────────────
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -571,20 +615,36 @@
         let FIELD_LEFT, FIELD_RIGHT, FIELD_TOP, FIELD_BOTTOM, PLAY_LEFT, PLAY_RIGHT;
 
         function updateFieldBounds() {
-            FIELD_LEFT = FIELD_MARGIN;
-            FIELD_RIGHT = W - FIELD_MARGIN;
-            FIELD_TOP = FIELD_MARGIN;
-            FIELD_BOTTOM = H - FIELD_MARGIN;
+            // Margin shrinks as player count increases, making the field "larger"
+            let marginX = 40, marginY = 40;
+            if (gameModeSize === 1) {
+                marginX = W * 0.15;
+                marginY = H * 0.15;
+            } else if (gameModeSize === 2) {
+                marginX = W * 0.08;
+                marginY = H * 0.08;
+            } else {
+                marginX = 40;
+                marginY = 40;
+            }
+
+            FIELD_LEFT = marginX;
+            FIELD_RIGHT = W - marginX;
+            FIELD_TOP = marginY;
+            FIELD_BOTTOM = H - marginY;
             PLAY_LEFT = FIELD_LEFT + END_ZONE_W;
             PLAY_RIGHT = FIELD_RIGHT - END_ZONE_W;
         }
         updateFieldBounds();
+
+
 
         function resizeGame() {
             const container = document.getElementById('canvas-container');
             const rect = container.getBoundingClientRect();
             W = Math.floor(rect.width) || window.innerWidth;
             H = Math.floor(rect.height) || (window.innerHeight - 120);
+
             canvas.width = W;
             canvas.height = H;
             updateFieldBounds();
@@ -712,6 +772,31 @@
                     },
                 },
             };
+
+            gs.players.p1.team = 'p1';
+            gs.players.p2.team = 'p2';
+
+            const yOffsets = gameModeSize === 2 ? [120] : (gameModeSize === 3 ? [120, -120] : []);
+            yOffsets.forEach((off, idx) => {
+                gs.players[`p1_bot${idx + 1}`] = {
+                    x: PLAY_LEFT + 60, y: H / 2 + off,
+                    vx: 0, vy: 0, r: PLAYER_R, color: '#00b4df', glow: '#00b4df', facing: 1,
+                    frozenTimer: 0, poweredTimer: 0, slideTimer: 0, slideVx: 0, slideVy: 0,
+                    clones: [], controlsReversedTimer: 0, lobPending: false, lobCharging: false,
+                    lobChargeTimer: 0, slowOrbCharging: false, slowOrbChargeTimer: 0, smokeCharging: false,
+                    smokeChargeTimer: 0, growTimer: 0, shrinkTimer: 0, pullingTimer: 0, pulledBy: null,
+                    lastDirX: 1, lastDirY: 0, abilities: [], team: 'p1', isBot: true
+                };
+                gs.players[`p2_bot${idx + 1}`] = {
+                    x: PLAY_RIGHT - 60, y: H / 2 + off,
+                    vx: 0, vy: 0, r: PLAYER_R, color: '#df2d4d', glow: '#df2d4d', facing: -1,
+                    frozenTimer: 0, poweredTimer: 0, slideTimer: 0, slideVx: 0, slideVy: 0,
+                    clones: [], controlsReversedTimer: 0, lobPending: false, lobCharging: false,
+                    lobChargeTimer: 0, slowOrbCharging: false, slowOrbChargeTimer: 0, smokeCharging: false,
+                    smokeChargeTimer: 0, growTimer: 0, shrinkTimer: 0, pullingTimer: 0, pulledBy: null,
+                    lastDirX: -1, lastDirY: 0, abilities: [], team: 'p2', isBot: true
+                };
+            });
         }
 
         // ─────────────── HUD BUILD ───────────────
@@ -1733,39 +1818,42 @@
         }
 
         function checkCollisions(dt) {
-            const p1 = gs.players.p1;
-            const p2 = gs.players.p2;
+            const pKeys = Object.keys(gs.players);
             const b = gs.ball;
 
             // Tackle cooldown
             if (gs.tackleCooldown > 0) gs.tackleCooldown -= dt;
 
             // Player-player collision
-            const dx = p2.x - p1.x, dy = p2.y - p1.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const minDist = p1.r + p2.r;
-            if (dist < minDist && dist > 0) {
-                const nx = dx / dist, ny = dy / dist;
-                const overlap = minDist - dist;
+            for (let i = 0; i < pKeys.length; i++) {
+                for (let j = i + 1; j < pKeys.length; j++) {
+                    const p1 = gs.players[pKeys[i]];
+                    const p2 = gs.players[pKeys[j]];
+                    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = p1.r + p2.r;
+                    if (dist < minDist && dist > 0) {
+                        const nx = dx / dist, ny = dy / dist;
+                        const overlap = minDist - dist;
 
-                // Always separate players
-                p1.x -= nx * overlap * 0.5;
-                p1.y -= ny * overlap * 0.5;
-                p2.x += nx * overlap * 0.5;
-                p2.y += ny * overlap * 0.5;
+                        p1.x -= nx * overlap * 0.5;
+                        p1.y -= ny * overlap * 0.5;
+                        p2.x += nx * overlap * 0.5;
+                        p2.y += ny * overlap * 0.5;
 
-                // Powered player knocks ball loose on contact
-                if (gs.tackleCooldown <= 0) {
-                    if (p1.poweredTimer > 0 && b.holder === 'p2') {
-                        b.holder = null; b.vx = nx * 6; b.vy = ny * 6; b.inAir = true;
-                        gs.tackleCooldown = 800;
-                        spawnParticles(p2.x, p2.y, '#ffd700', 20, 6);
-                        showFlash('🔥 YIKILDI!', '#ffd700');
-                    } else if (p2.poweredTimer > 0 && b.holder === 'p1') {
-                        b.holder = null; b.vx = -nx * 6; b.vy = -ny * 6; b.inAir = true;
-                        gs.tackleCooldown = 800;
-                        spawnParticles(p1.x, p1.y, '#ffd700', 20, 6);
-                        showFlash('🔥 YIKILDI!', '#ffd700');
+                        if (gs.tackleCooldown <= 0 && p1.team !== p2.team) {
+                            if (p1.poweredTimer > 0 && b.holder === pKeys[j]) {
+                                b.holder = null; b.vx = nx * 6; b.vy = ny * 6; b.inAir = true;
+                                gs.tackleCooldown = 800;
+                                spawnParticles(p2.x, p2.y, '#ffd700', 20, 6);
+                                showFlash('🔥 YIKILDI!', '#ffd700');
+                            } else if (p2.poweredTimer > 0 && b.holder === pKeys[i]) {
+                                b.holder = null; b.vx = -nx * 6; b.vy = -ny * 6; b.inAir = true;
+                                gs.tackleCooldown = 800;
+                                spawnParticles(p1.x, p1.y, '#ffd700', 20, 6);
+                                showFlash('🔥 YIKILDI!', '#ffd700');
+                            }
+                        }
                     }
                 }
             }
@@ -1773,7 +1861,7 @@
             // Auto-pickup: only when ball is free AND nearly stationary (prevents catching a thrown/passed ball)
             const ballSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
             if (ballSpeed < 2) {
-                ['p1', 'p2'].forEach(pid => {
+                pKeys.forEach(pid => {
                     const p = gs.players[pid];
                     if (b.holder === null && !b.lobMode && p.frozenTimer <= 0) {
                         const bx = b.x - p.x, by = b.y - p.y;
@@ -1794,21 +1882,30 @@
                 fp.y += fp.vy;
                 fp.life--;
 
-                const targetPid = fp.owner === 'p1' ? 'p2' : 'p1';
-                const target = gs.players[targetPid];
-                const fdx = fp.x - target.x, fdy = fp.y - target.y;
-                if (Math.sqrt(fdx * fdx + fdy * fdy) < target.r + 6) {
+                const ownerTeam = gs.players[fp.owner] ? gs.players[fp.owner].team : null;
+                let hitTarget = null;
+                for (const pid of pKeys) {
+                    const target = gs.players[pid];
+                    if (target.team !== ownerTeam) {
+                        const fdx = fp.x - target.x, fdy = fp.y - target.y;
+                        if (Math.sqrt(fdx * fdx + fdy * fdy) < target.r + 6) {
+                            hitTarget = pid;
+                            break;
+                        }
+                    }
+                }
+
+                if (hitTarget) {
+                    const target = gs.players[hitTarget];
                     target.frozenTimer = 2000;
-                    if (gs.ball.holder === targetPid) {
+                    if (gs.ball.holder === hitTarget) {
                         gs.ball.holder = null;
-                        gs.ball.vx = targetPid === 'p1' ? -2 : 2; gs.ball.vy = 0;
+                        gs.ball.vx = target.team === 'p1' ? -2 : 2; gs.ball.vy = 0;
                     }
                     spawnParticles(target.x, target.y, '#88eeff', 25, 5);
                     showFlash('🧊 DONDU!', '#88eeff');
                     gs.freezeProjectile = null;
-                }
-
-                if (fp && (fp.life <= 0 || fp.x < FIELD_LEFT || fp.x > FIELD_RIGHT || fp.y < FIELD_TOP || fp.y > FIELD_BOTTOM)) {
+                } else if (fp.life <= 0 || fp.x < FIELD_LEFT || fp.x > FIELD_RIGHT || fp.y < FIELD_TOP || fp.y > FIELD_BOTTOM) {
                     gs.freezeProjectile = null;
                 }
             }
@@ -1820,15 +1917,25 @@
                 hp.y += hp.vy;
                 hp.life--;
 
-                const targetPid = hp.owner === 'p1' ? 'p2' : 'p1';
-                const target = gs.players[targetPid];
-                const owner = gs.players[hp.owner];
-                const hdx = hp.x - target.x, hdy = hp.y - target.y;
-                if (Math.sqrt(hdx * hdx + hdy * hdy) < target.r + 6) {
+                const ownerTeam = gs.players[hp.owner] ? gs.players[hp.owner].team : null;
+                let hitTarget = null;
+                for (const pid of pKeys) {
+                    const target = gs.players[pid];
+                    if (target.team !== ownerTeam) {
+                        const hdx = hp.x - target.x, hdy = hp.y - target.y;
+                        if (Math.sqrt(hdx * hdx + hdy * hdy) < target.r + 6) {
+                            hitTarget = pid;
+                            break;
+                        }
+                    }
+                }
+
+                if (hitTarget) {
+                    const target = gs.players[hitTarget];
+                    const owner = gs.players[hp.owner];
                     target.pullingTimer = 800; // Skill duration
                     target.pulledBy = hp.owner;
-                    // If target was holding the ball, they might lose it
-                    if (gs.ball.holder === targetPid) {
+                    if (gs.ball.holder === hitTarget) {
                         gs.ball.holder = null;
                         gs.ball.vx = (owner.x - target.x) * 0.05;
                         gs.ball.vy = (owner.y - target.y) * 0.05;
@@ -1836,9 +1943,7 @@
                     spawnParticles(target.x, target.y, '#ffaa33', 20, 5);
                     showFlash('🪝 YAKALANDI!', '#ffaa33');
                     gs.hookProjectile = null;
-                }
-
-                if (hp && (hp.life <= 0 || hp.x < FIELD_LEFT || hp.x > FIELD_RIGHT || hp.y < FIELD_TOP || hp.y > FIELD_BOTTOM)) {
+                } else if (hp.life <= 0 || hp.x < FIELD_LEFT || hp.x > FIELD_RIGHT || hp.y < FIELD_TOP || hp.y > FIELD_BOTTOM) {
                     gs.hookProjectile = null;
                 }
             }
@@ -2606,6 +2711,64 @@
             ctx.restore();
         }
 
+        // ─────────────── BOT LOGIC ───────────────
+        function updateBots(dt) {
+            if (!gameRunning || gameOver) return;
+            const b = gs.ball;
+            Object.keys(gs.players).forEach(pid => {
+                const p = gs.players[pid];
+                if (!p.isBot || p.frozenTimer > 0) return;
+
+                const speed = PLAYER_SPEED * 0.85; // Bots are slightly slower
+                let targetX = b.x;
+                let targetY = b.y;
+
+                // Simple AI state machine
+                if (b.holder === pid) {
+                    // I have the ball, run to enemy endzone
+                    targetX = p.team === 'p1' ? FIELD_RIGHT : FIELD_LEFT;
+                    targetY = H / 2;
+                } else if (b.holder && b.holder !== pid) {
+                    const holderTeam = gs.players[b.holder].team;
+                    if (holderTeam === p.team) {
+                        // Teammate has ball, run forward to receive pass or block
+                        targetX = p.team === 'p1' ? FIELD_RIGHT - 100 : FIELD_LEFT + 100;
+                        // Stay on own lane
+                        targetY = p.y;
+                    } else {
+                        // Enemy has ball, intercept
+                        targetX = b.x;
+                        targetY = b.y;
+                    }
+                }
+
+                // Smooth movement towards target
+                const dx = targetX - p.x;
+                const dy = targetY - p.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > 5) {
+                    // We directly set virtual key presses for updatePlayer to handle
+                    const moveX = dx / dist;
+                    const moveY = dy / dist;
+
+                    // Instead of simulating keys, since updatePlayer uses keys[] explicitly,
+                    // we can just set p.vx and p.vy directly because updatePlayer checks `!p.isBot` or we can override it.
+                    // Wait, updatePlayer reads `keys` for p1 and p2! Let's just set velocities here.
+                    p.vx = moveX * speed;
+                    p.vy = moveY * speed;
+                    p.lastDirX = p.vx > 0 ? 1 : (p.vx < 0 ? -1 : p.lastDirX);
+                    p.lastDirY = p.vy > 0 ? 1 : (p.vy < 0 ? -1 : 0);
+                    if (p.lastDirX !== 0) p.facing = p.lastDirX;
+                } else {
+                    p.vx = 0;
+                    p.vy = 0;
+                }
+
+                // Auto throw if close to goal and blocked? For now, just run.
+            });
+        }
+
         // ─────────────── MAIN LOOP ───────────────
         let lastTime = 0;
         function gameLoop(ts) {
@@ -2615,9 +2778,13 @@
 
             pollGamepadActions();
 
-            // Update
-            updatePlayer('p1', dt);
-            updatePlayer('p2', dt);
+            // Update Bots
+            updateBots(dt);
+
+            // Update Players
+            Object.keys(gs.players).forEach(pid => {
+                updatePlayer(pid, dt);
+            });
             updateBall(dt);
             updatePenaltyBar(dt);
             checkCollisions(dt);
@@ -2630,8 +2797,7 @@
             drawSlowZones();
             drawFreezeProjectile();
             drawHook();
-            drawPlayer('p1');
-            drawPlayer('p2');
+            Object.keys(gs.players).forEach(pid => drawPlayer(pid));
             drawBall();
             drawSmokeZones();
             drawParticles();
