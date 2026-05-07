@@ -419,10 +419,73 @@
             gap: 12px;
         }
 
+        .profile-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+
+        .profile-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 8px 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .profile-card:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: translateY(-2px);
+        }
+
+        .profile-card.selected {
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 14px currentColor;
+            border-color: currentColor;
+        }
+
+        .profile-icon {
+            font-size: 22px;
+            line-height: 1;
+        }
+
+        .profile-name {
+            font-size: 10px;
+            font-family: 'Orbitron', monospace;
+            color: #fff;
+            margin-top: 4px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .profile-divider {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.12);
+            margin: 4px 0 2px;
+        }
+
         .skill-pool {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
             gap: 8px;
+            min-height: 30px;
+        }
+
+        .skill-card.locked {
+            opacity: 0.85;
+            cursor: default;
+            pointer-events: none;
+        }
+
+        .pick-hint {
+            font-size: 11px;
+            opacity: 0.65;
+            text-align: center;
+            font-family: 'Orbitron', monospace;
+            letter-spacing: 1px;
         }
 
         .skill-card {
@@ -576,25 +639,23 @@
 
             <!-- Skill Selection Overlay -->
             <div id="skill-selection-overlay" class="hidden">
-                <h2>SKILL SEÇİMİ</h2>
+                <h2>SINIF & SKILL SEÇİMİ</h2>
                 <div class="selection-container">
                     <div class="player-selection p1-selection">
-                        <h3 style="color: #00d4ff">🔵 OYUNCU 1 (3 Seçim)</h3>
+                        <h3 style="color: #00d4ff">🔵 OYUNCU 1</h3>
+                        <div class="profile-row" id="p1-profile-row"></div>
+                        <div class="profile-divider"></div>
+                        <div class="pick-hint" id="p1-pick-hint">Sınıf seçin</div>
                         <div class="skill-pool" id="p1-skill-pool"></div>
-                        <div class="selected-skills" id="p1-selected-skills">
-                            <div class="selected-slot" id="p1-slot-0"></div>
-                            <div class="selected-slot" id="p1-slot-1"></div>
-                            <div class="selected-slot" id="p1-slot-2"></div>
-                        </div>
+                        <div class="selected-skills" id="p1-selected-skills"></div>
                     </div>
                     <div class="player-selection p2-selection">
-                        <h3 style="color: #ff4d6d">🔴 OYUNCU 2 (3 Seçim)</h3>
+                        <h3 style="color: #ff4d6d">🔴 OYUNCU 2</h3>
+                        <div class="profile-row" id="p2-profile-row"></div>
+                        <div class="profile-divider"></div>
+                        <div class="pick-hint" id="p2-pick-hint">Sınıf seçin</div>
                         <div class="skill-pool" id="p2-skill-pool"></div>
-                        <div class="selected-skills" id="p2-selected-skills">
-                            <div class="selected-slot" id="p2-slot-0"></div>
-                            <div class="selected-slot" id="p2-slot-1"></div>
-                            <div class="selected-slot" id="p2-slot-2"></div>
-                        </div>
+                        <div class="selected-skills" id="p2-selected-skills"></div>
                     </div>
                 </div>
                 <button id="confirm-skills-btn" disabled onclick="confirmSkills()">ONAYLA VE BAŞLA</button>
@@ -689,6 +750,14 @@
             { id: 'hook', icon: '🪝', name: 'Halat', cd: 12000, duration: 800, color: '#ffaa33' },
         ];
 
+        const PROFILES = [
+            { id: 'teknik', name: 'Teknik', icon: '🎯', color: '#00d4ff', skills: ['lob', 'geopas', 'speedboost'], slots: 3 },
+            { id: 'savasci', name: 'Savaşçı', icon: '⚔️', color: '#aa00ff', skills: ['slide', 'power', 'longpass'], slots: 3 },
+            { id: 'destek', name: 'Destek', icon: '🛡️', color: '#33ffaa', skills: ['reverse', 'sloworb', 'hook', 'freeze', 'invisball', 'wall', 'blind'], slots: 4 },
+            { id: 'ofansif', name: 'Ofansif', icon: '🔥', color: '#ff4400', skills: ['selfpass', 'smoke', 'clone', 'shot'], slots: 3 },
+        ];
+
+        let p1Profile = null, p2Profile = null;
         let p1SelectedSkills = [];
         let p2SelectedSkills = [];
 
@@ -729,6 +798,7 @@
                     shadow: 0,            // for lob arc
                     longPassMode: false, longPassOwner: null,
                     shotMode: false, shotOwner: null,
+                    teknikPassMode: false,
                     invisTimer: 0,
                 },
 
@@ -760,6 +830,8 @@
                         lastDirX: 1, lastDirY: 0,
                         abilities: [],
                         speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
+                        passCharging: false, passChargeMs: 0,
+                        longPassCharging: false, longPassChargeMs: 0,
                     },
                     p2: {
                         x: PLAY_RIGHT - 60, y: H / 2,
@@ -788,6 +860,8 @@
                         lastDirX: -1, lastDirY: 0,
                         abilities: [],
                         speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
+                        passCharging: false, passChargeMs: 0,
+                        longPassCharging: false, longPassChargeMs: 0,
                     },
                 },
             };
@@ -809,6 +883,8 @@
                     smokeChargeTimer: 0, growTimer: 0, shrinkTimer: 0, pullingTimer: 0, pulledBy: null,
                     lastDirX: 1, lastDirY: 0, abilities: [], team: 'p1', isBot: true,
                     speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
+                    passCharging: false, passChargeMs: 0,
+                    longPassCharging: false, longPassChargeMs: 0,
                 };
                 gs.players[`p2_bot${idx + 1}`] = {
                     x: PLAY_RIGHT - 60, y: H / 2 + off,
@@ -819,6 +895,8 @@
                     smokeChargeTimer: 0, growTimer: 0, shrinkTimer: 0, pullingTimer: 0, pulledBy: null,
                     lastDirX: -1, lastDirY: 0, abilities: [], team: 'p2', isBot: true,
                     speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
+                    passCharging: false, passChargeMs: 0,
+                    longPassCharging: false, longPassChargeMs: 0,
                 };
             });
         }
@@ -1076,21 +1154,8 @@
                 showFlash('🏎️ HIZ BOOST!', ab.color);
             }
             else if (ab.id === 'longpass') {
-                if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
-                ab.active = true;
-                ab.cdLeft = ab.cd;
-                const b = gs.ball;
-                b.holder = null;
-                b.inAir = true;
-                b.longPassMode = true;
-                b.longPassOwner = pid;
-                const lpSpeed = PASS_SPEED * 1.4;
-                b.vx = p.lastDirX * lpSpeed;
-                b.vy = p.lastDirY * lpSpeed;
-                b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
-                b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
-                spawnParticles(b.x, b.y, ab.color, 20, 5);
-                showFlash('🏹 UZUN PAS!', ab.color);
+                // Şarj akışı keydown'da startLongPassCharge ile başlatılır
+                startLongPassCharge(pid);
             }
             else if (ab.id === 'invisball') {
                 ab.active = true;
@@ -1172,6 +1237,8 @@
             const ab = p.abilities.find(a => a.id === 'lob');
             if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
             if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+            p.passCharging = false;
+            p.passChargeMs = 0;
             p.lobCharging = true;
             p.lobChargeTimer = 0;
         }
@@ -1191,9 +1258,9 @@
                 gs.ball.lobProgress = 0;
                 gs.ball.lobFrom = { x: p.x, y: p.y };
 
-                const ratio = Math.min(1, p.lobChargeTimer / 1500);
+                const ratio = Math.min(1, p.lobChargeTimer / LOB_MAX_CHARGE_MS);
                 const maxDist = W * 0.85;
-                const dist = 50 + ratio * maxDist;
+                const dist = 80 + ratio * maxDist;
 
                 gs.ball.lobTo = {
                     x: Math.max(FIELD_LEFT, Math.min(FIELD_RIGHT, p.x + p.lastDirX * dist)),
@@ -1249,6 +1316,49 @@
             p.smokeChargeTimer = 0;
         }
 
+        const LONG_PASS_MAX_CHARGE_MS = 1200;
+        function startLongPassCharge(pid) {
+            const p = gs.players[pid];
+            const ab = p.abilities.find(a => a.id === 'longpass');
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+            p.passCharging = false; p.passChargeMs = 0;
+            p.lobCharging = false; p.lobChargeTimer = 0;
+            p.longPassCharging = true;
+            p.longPassChargeMs = 0;
+            ab.active = true;
+            spawnParticles(p.x, p.y, ab.color, 6, 2);
+        }
+
+        function executeLongPass(pid) {
+            const p = gs.players[pid];
+            if (!p.longPassCharging) return;
+            p.longPassCharging = false;
+            const ab = p.abilities.find(a => a.id === 'longpass');
+            if (!ab) return;
+            if (gs.ball.holder !== pid) {
+                ab.active = false;
+                p.longPassChargeMs = 0;
+                return;
+            }
+            const ratio = Math.min(1, p.longPassChargeMs / LONG_PASS_MAX_CHARGE_MS);
+            p.longPassChargeMs = 0;
+            ab.cdLeft = ab.cd;
+            ab.active = true;
+            const b = gs.ball;
+            b.holder = null;
+            b.inAir = true;
+            b.longPassMode = true;
+            b.longPassOwner = pid;
+            const lpSpeed = PASS_SPEED * (1.0 + ratio * 1.5); // 1.0x → 2.5x
+            b.vx = p.lastDirX * lpSpeed;
+            b.vy = p.lastDirY * lpSpeed;
+            b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+            b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+            spawnParticles(b.x, b.y, ab.color, 20, 5);
+            showFlash(ratio > 0.7 ? '🏹 GÜÇLÜ UZUN PAS!' : '🏹 UZUN PAS!', ab.color);
+        }
+
         function executeSmoke(pid) {
             const p = gs.players[pid];
             if (!p.smokeCharging) return;
@@ -1281,6 +1391,10 @@
             const p = gs.players[pid];
             const opp = gs.players[pid === 'p1' ? 'p2' : 'p1'];
             if (gs.ball.holder !== pid) return;
+            p.passCharging = false;
+            p.passChargeMs = 0;
+            p.longPassCharging = false;
+            p.longPassChargeMs = 0;
             gs.ball.holder = null;
             gs.ball.inAir = true;
             // throw toward opponent
@@ -1303,6 +1417,7 @@
                 b.inAir = false;
                 b.shotMode = false; b.shotOwner = null;
                 b.longPassMode = false; b.longPassOwner = null;
+                b.teknikPassMode = false;
                 spawnParticles(p.x, p.y, p.color, 8, 2);
             }
         }
@@ -1330,9 +1445,20 @@
             const distToOpp = Math.hypot(opp.x - p.x, opp.y - p.y);
             const distToBall = Math.hypot(b.x - p.x, b.y - p.y);
 
+            const isWarrior = p.profile && p.profile.id === 'savasci';
+
             // PRIORITY 1: Interaction with Opponent (FOUL or STEAL)
             if (distToOpp <= TACKLE_RANGE) {
                 if (b.holder === oppPid) {
+                    if (isWarrior) {
+                        // Savaşçı: her açıdan top çalar, faul olmaz
+                        b.holder = pid; b.vx = 0; b.vy = 0; b.inAir = false;
+                        gs.foulAttempts[pid] = 0;
+                        gs.tackleCooldown = 600;
+                        spawnParticles(p.x, p.y, '#aa00ff', 22, 6);
+                        showFlash('⚔️ SAVAŞÇI ÇALDI!', '#aa00ff');
+                        return;
+                    }
                     // Ball IS held by opponent — shielding/steal logic
                     const dBallX = b.x - p.x;
                     const dBallY = b.y - p.y;
@@ -1370,6 +1496,9 @@
                         spawnParticles(p.x, p.y, p.color, 18, 5);
                         showFlash('🏈 KAPTIRDI!', p.color);
                     }
+                } else if (isWarrior) {
+                    // Savaşçı topsuz alanda da faul yapmaz, sadece etkisiz kalır
+                    spawnParticles(p.x, p.y, '#aa00ff', 6, 2);
                 } else {
                     // Ball NOT held by opponent but you're tackling them — FOUL!
                     gs.foulAttempts[pid]++;
@@ -1510,16 +1639,28 @@
 
         // ─────────────── INPUT ───────────────
         const PASS_SPEED = 15; // px/frame for directional pass
+        const NON_TEKNIK_PASS_MULT = 0.72; // teknik olmayan sınıflar için kısaltılmış menzil
+        const TEKNIK_PASS_MAX_CHARGE_MS = 900;
+        const LOB_MAX_CHARGE_MS = 800; // aşırtma pas: kısa basışta daha fazla menzil
+
+        function playerIsTeknik(pid) {
+            const prof = gs.players[pid] && gs.players[pid].profile;
+            return prof && prof.id === 'teknik';
+        }
 
         function directionalPass(pid) {
             const p = gs.players[pid];
             const b = gs.ball;
             if (b.holder !== pid || p.frozenTimer > 0) return;
 
+            p.passCharging = false;
+            p.passChargeMs = 0;
             b.holder = null;
             b.inAir = true;
-            b.vx = p.lastDirX * PASS_SPEED;
-            b.vy = p.lastDirY * PASS_SPEED;
+            b.teknikPassMode = false;
+            const passMult = playerIsTeknik(pid) ? 1 : NON_TEKNIK_PASS_MULT;
+            b.vx = p.lastDirX * PASS_SPEED * passMult;
+            b.vy = p.lastDirY * PASS_SPEED * passMult;
             // Spawn ball just outside the player's radius so auto-pickup can't immediately re-catch it
             b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
             b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
@@ -1527,11 +1668,47 @@
             showFlash('🏈 PAS!', pid === 'p1' ? '#00d4ff' : '#ff4d6d');
         }
 
+        function executeTeknikChargedPass(pid) {
+            const p = gs.players[pid];
+            const b = gs.ball;
+            if (!p.passCharging || b.holder !== pid || p.frozenTimer > 0) {
+                p.passCharging = false;
+                p.passChargeMs = 0;
+                return;
+            }
+            p.passCharging = false;
+            const charge = Math.min(TEKNIK_PASS_MAX_CHARGE_MS, p.passChargeMs);
+            p.passChargeMs = 0;
+            const t = charge / TEKNIK_PASS_MAX_CHARGE_MS;
+            const speedMult = 1 + t * 1.45;
+
+            b.holder = null;
+            b.inAir = true;
+            b.teknikPassMode = true;
+            b.longPassMode = false;
+            b.longPassOwner = null;
+            b.shotMode = false;
+            b.shotOwner = null;
+            b.vx = p.lastDirX * PASS_SPEED * speedMult;
+            b.vy = p.lastDirY * PASS_SPEED * speedMult;
+            b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+            b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+            spawnParticles(b.x, b.y, '#00e5ff', 18, 5);
+            showFlash(t > 0.55 ? '🎯 GÜÇLÜ PAS!' : '🎯 TEKNİK PAS!', '#00e5ff');
+        }
+
         const actionMap = {
             Space: () => {
                 if (gs.penaltyMode) {
                     if (gs.penaltyMode.kicker === 'p1') shootPenalty('p1');
                     else if (gs.penaltyMode.kicker === 'p2') shootPenalty('p2');
+                    return;
+                }
+                const h = gs.ball.holder;
+                if (h && playerIsTeknik(h)) {
+                    const hp = gs.players[h];
+                    hp.passCharging = true;
+                    hp.passChargeMs = 0;
                     return;
                 }
                 if (gs.ball.holder === 'p1') directionalPass('p1');
@@ -1560,37 +1737,45 @@
                     actionMap[e.code]();
                 } else {
                     const p1AbIdx = gs.players.p1.abilities.findIndex(a => a.key === e.code);
-                    if (p1AbIdx !== -1) {
-                        const ab = gs.players.p1.abilities[p1AbIdx];
-                        if (ab.id === 'lob') startLobCharge('p1');
-                        else if (ab.id === 'sloworb') startSlowOrbCharge('p1');
-                        else if (ab.id === 'smoke') startSmokeCharge('p1');
-                        else useAbility('p1', p1AbIdx);
-                    }
+                    if (p1AbIdx !== -1) startAbilityByIdx('p1', p1AbIdx);
                     const p2AbIdx = gs.players.p2.abilities.findIndex(a => a.key === e.code);
-                    if (p2AbIdx !== -1) {
-                        const ab = gs.players.p2.abilities[p2AbIdx];
-                        if (ab.id === 'lob') startLobCharge('p2');
-                        else if (ab.id === 'sloworb') startSlowOrbCharge('p2');
-                        else if (ab.id === 'smoke') startSmokeCharge('p2');
-                        else useAbility('p2', p2AbIdx);
-                    }
+                    if (p2AbIdx !== -1) startAbilityByIdx('p2', p2AbIdx);
                 }
             }
         });
         document.addEventListener('keyup', e => {
             keys[e.code] = false;
+            if (gameRunning && !gameOver && e.code === 'Space' && !gs.penaltyMode) {
+                if (gs.players.p1.passCharging && gs.ball.holder === 'p1') executeTeknikChargedPass('p1');
+                else if (gs.players.p2.passCharging && gs.ball.holder === 'p2') executeTeknikChargedPass('p2');
+            }
             if (gameRunning && !gameOver) {
-                const p1Ab = gs.players.p1.abilities.find(a => a.key === e.code);
-                if (p1Ab && p1Ab.id === 'lob' && gs.players.p1.lobCharging) executeLobPass('p1');
-                if (p1Ab && p1Ab.id === 'sloworb' && gs.players.p1.slowOrbCharging) executeSlowOrb('p1');
-                if (p1Ab && p1Ab.id === 'smoke' && gs.players.p1.smokeCharging) executeSmoke('p1');
-                const p2Ab = gs.players.p2.abilities.find(a => a.key === e.code);
-                if (p2Ab && p2Ab.id === 'lob' && gs.players.p2.lobCharging) executeLobPass('p2');
-                if (p2Ab && p2Ab.id === 'sloworb' && gs.players.p2.slowOrbCharging) executeSlowOrb('p2');
-                if (p2Ab && p2Ab.id === 'smoke' && gs.players.p2.smokeCharging) executeSmoke('p2');
+                const p1Idx = gs.players.p1.abilities.findIndex(a => a.key === e.code);
+                if (p1Idx !== -1) releaseAbilityByIdx('p1', p1Idx);
+                const p2Idx = gs.players.p2.abilities.findIndex(a => a.key === e.code);
+                if (p2Idx !== -1) releaseAbilityByIdx('p2', p2Idx);
             }
         });
+
+        // ─────────────── HELPER: ABILITY PRESS/RELEASE ───────────────
+        function startAbilityByIdx(pid, idx) {
+            const ab = gs.players[pid] && gs.players[pid].abilities[idx];
+            if (!ab) return;
+            if (ab.id === 'lob') startLobCharge(pid);
+            else if (ab.id === 'sloworb') startSlowOrbCharge(pid);
+            else if (ab.id === 'smoke') startSmokeCharge(pid);
+            else if (ab.id === 'longpass') startLongPassCharge(pid);
+            else useAbility(pid, idx);
+        }
+        function releaseAbilityByIdx(pid, idx) {
+            const ab = gs.players[pid] && gs.players[pid].abilities[idx];
+            if (!ab) return;
+            const p = gs.players[pid];
+            if (ab.id === 'lob' && p.lobCharging) executeLobPass(pid);
+            if (ab.id === 'sloworb' && p.slowOrbCharging) executeSlowOrb(pid);
+            if (ab.id === 'smoke' && p.smokeCharging) executeSmoke(pid);
+            if (ab.id === 'longpass' && p.longPassCharging) executeLongPass(pid);
+        }
 
         // ─────────────── GAMEPAD INPUT ───────────────
         const gpPrevButtons = { p1: [], p2: [] };
@@ -1613,7 +1798,17 @@
                     if (gs.penaltyMode) {
                         if (gs.penaltyMode.kicker === pid) shootPenalty(pid);
                     } else if (gs.ball.holder === pid) {
-                        directionalPass(pid);
+                        if (playerIsTeknik(pid)) {
+                            p.passCharging = true;
+                            p.passChargeMs = 0;
+                        } else {
+                            directionalPass(pid);
+                        }
+                    }
+                }
+                if (justReleased(0)) {
+                    if (!gs.penaltyMode && gs.ball.holder === pid && p.passCharging && playerIsTeknik(pid)) {
+                        executeTeknikChargedPass(pid);
                     }
                 }
 
@@ -1624,49 +1819,20 @@
                 }
 
                 // Button 4 (L1/LB): Ability 1
-                if (justPressed(4)) {
-                    const ab = gs.players[pid].abilities[0];
-                    if (ab && ab.id === 'lob') startLobCharge(pid);
-                    else if (ab && ab.id === 'sloworb') startSlowOrbCharge(pid);
-                    else if (ab && ab.id === 'smoke') startSmokeCharge(pid);
-                    else useAbility(pid, 0);
-                }
-                if (justReleased(4)) {
-                    const ab = gs.players[pid].abilities[0];
-                    if (ab && ab.id === 'lob' && gs.players[pid].lobCharging) executeLobPass(pid);
-                    if (ab && ab.id === 'sloworb' && gs.players[pid].slowOrbCharging) executeSlowOrb(pid);
-                    if (ab && ab.id === 'smoke' && gs.players[pid].smokeCharging) executeSmoke(pid);
-                }
+                if (justPressed(4)) startAbilityByIdx(pid, 0);
+                if (justReleased(4)) releaseAbilityByIdx(pid, 0);
 
                 // Button 5 (R1/RB): Ability 2
-                if (justPressed(5)) {
-                    const ab = gs.players[pid].abilities[1];
-                    if (ab && ab.id === 'lob') startLobCharge(pid);
-                    else if (ab && ab.id === 'sloworb') startSlowOrbCharge(pid);
-                    else if (ab && ab.id === 'smoke') startSmokeCharge(pid);
-                    else useAbility(pid, 1);
-                }
-                if (justReleased(5)) {
-                    const ab = gs.players[pid].abilities[1];
-                    if (ab && ab.id === 'lob' && gs.players[pid].lobCharging) executeLobPass(pid);
-                    if (ab && ab.id === 'sloworb' && gs.players[pid].slowOrbCharging) executeSlowOrb(pid);
-                    if (ab && ab.id === 'smoke' && gs.players[pid].smokeCharging) executeSmoke(pid);
-                }
+                if (justPressed(5)) startAbilityByIdx(pid, 1);
+                if (justReleased(5)) releaseAbilityByIdx(pid, 1);
 
                 // Button 3 (Y/Triangle): Ability 3
-                if (justPressed(3)) {
-                    const ab = gs.players[pid].abilities[2];
-                    if (ab && ab.id === 'lob') startLobCharge(pid);
-                    else if (ab && ab.id === 'sloworb') startSlowOrbCharge(pid);
-                    else if (ab && ab.id === 'smoke') startSmokeCharge(pid);
-                    else useAbility(pid, 2);
-                }
-                if (justReleased(3)) {
-                    const ab = gs.players[pid].abilities[2];
-                    if (ab && ab.id === 'lob' && gs.players[pid].lobCharging) executeLobPass(pid);
-                    if (ab && ab.id === 'sloworb' && gs.players[pid].slowOrbCharging) executeSlowOrb(pid);
-                    if (ab && ab.id === 'smoke' && gs.players[pid].smokeCharging) executeSmoke(pid);
-                }
+                if (justPressed(3)) startAbilityByIdx(pid, 2);
+                if (justReleased(3)) releaseAbilityByIdx(pid, 2);
+
+                // Button 1 (B/Circle): Ability 4 (Destek 4. skill için)
+                if (justPressed(1) && gs.players[pid].abilities[3]) startAbilityByIdx(pid, 3);
+                if (justReleased(1) && gs.players[pid].abilities[3]) releaseAbilityByIdx(pid, 3);
 
                 // Update prev states
                 for (let i = 0; i < gp.buttons.length; i++) {
@@ -1756,6 +1922,21 @@
                 }
             }
 
+            // Teknik pas şarjı (Space veya gamepad A basılı kaldıkça menzil artar)
+            if (p.passCharging) {
+                if (gs.ball.holder !== pid || gs.penaltyMode || !playerIsTeknik(pid)) {
+                    p.passCharging = false;
+                    p.passChargeMs = 0;
+                } else {
+                    const gpIdx = pid === 'p1' ? 0 : 1;
+                    const gp = navigator.getGamepads ? navigator.getGamepads()[gpIdx] : null;
+                    const btnHeld = !!(gp && gp.buttons && gp.buttons[0] && gp.buttons[0].pressed);
+                    if (keys['Space'] || btnHeld) {
+                        p.passChargeMs = Math.min(TEKNIK_PASS_MAX_CHARGE_MS, p.passChargeMs + dt);
+                    }
+                }
+            }
+
             // slide
             if (p.slideTimer > 0) {
                 p.slideTimer -= dt;
@@ -1785,7 +1966,11 @@
 
             // Scale speed: bigger = slower, smaller = faster
             const speedBoostMod = p.speedBoostTimer > 0 ? 1.9 : 1.0;
-            const speed = PLAYER_SPEED * (gs.ball.holder === pid ? 0.8 : 1) * (p.poweredTimer > 0 ? 1.4 : 1) * zoneSlow * speedBoostMod;
+            const isOfansif = p.profile && p.profile.id === 'ofansif';
+            const profileSpeedMod = isOfansif ? 1.12 : 1.0;
+            // Ofansif: top tutarken yavaşlamaz
+            const ballHoldMod = (gs.ball.holder === pid && !isOfansif) ? 0.8 : 1;
+            const speed = PLAYER_SPEED * ballHoldMod * (p.poweredTimer > 0 ? 1.4 : 1) * zoneSlow * speedBoostMod * profileSpeedMod;
 
             // Gamepad input mapping
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -1862,9 +2047,9 @@
                 if (p.lastDirY < 0) ty = (p.y - FIELD_TOP) / -p.lastDirY;
                 else if (p.lastDirY > 0) ty = (FIELD_BOTTOM - p.y) / p.lastDirY;
                 const distToEdge = Math.max(0, Math.min(tx, ty));
-                const rate = (W * 0.85) / 1500;
+                const rate = (W * 0.85) / LOB_MAX_CHARGE_MS;
                 let dynamicMaxTime = (distToEdge - 30) / rate;
-                dynamicMaxTime = Math.max(350, Math.min(1500, dynamicMaxTime));
+                dynamicMaxTime = Math.max(200, Math.min(LOB_MAX_CHARGE_MS, dynamicMaxTime));
 
                 if (p.lobChargeTimer > dynamicMaxTime) {
                     p.lobCharging = false;
@@ -1895,6 +2080,23 @@
                     if (orbAb) orbAb.cdLeft = orbAb.cd;
                     spawnParticles(p.x, p.y, '#555', 15, 3);
                     showFlash('❌ KÜRE BİTTİ!', '#888');
+                }
+            }
+
+            // Long pass charging
+            if (p.longPassCharging) {
+                if (gs.ball.holder !== pid || gs.penaltyMode) {
+                    // top kayboldu / penalty: şarjı iptal et, cooldown başlatma
+                    p.longPassCharging = false;
+                    p.longPassChargeMs = 0;
+                    const lpAb = p.abilities.find(a => a.id === 'longpass');
+                    if (lpAb) lpAb.active = false;
+                } else {
+                    p.longPassChargeMs = Math.min(LONG_PASS_MAX_CHARGE_MS, p.longPassChargeMs + dt);
+                    if (p.longPassChargeMs >= LONG_PASS_MAX_CHARGE_MS) {
+                        // maks tutulduysa otomatik fırlat
+                        executeLongPass(pid);
+                    }
                 }
             }
 
@@ -1974,6 +2176,7 @@
                 const clearFastModes = () => {
                     if (b.longPassMode) { b.longPassMode = false; b.longPassOwner = null; }
                     if (b.shotMode) { b.shotMode = false; b.shotOwner = null; }
+                    if (b.teknikPassMode) b.teknikPassMode = false;
                 };
                 if (b.x - BALL_R < FIELD_LEFT) { b.x = FIELD_LEFT + BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
                 if (b.x + BALL_R > FIELD_RIGHT) { b.x = FIELD_RIGHT - BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
@@ -2021,21 +2224,42 @@
                                 spawnParticles(p1.x, p1.y, '#ffd700', 20, 6);
                                 showFlash('🔥 YIKILDI!', '#ffd700');
                             }
-                            // Güç skilli: temasa sersemletme
+                            // Güç skilli: temasa sersemletme (donma'dan kısa süreli)
+                            const POWER_STUN_MS = 1000;
                             if (p1.poweredTimer > 0 && p2.frozenTimer <= 0) {
-                                p2.frozenTimer = 1500;
+                                p2.frozenTimer = POWER_STUN_MS;
                                 if (b.holder === pKeys[j]) { b.holder = null; b.shotMode = false; b.shotOwner = null; b.vx = nx * 3; b.vy = ny * 3; b.inAir = true; }
-                                gs.tackleCooldown = 1000;
+                                gs.tackleCooldown = 700;
                                 spawnParticles(p2.x, p2.y, '#ffd700', 12, 4);
                                 showFlash('🥴 SERSEM!', '#ffd700');
                             } else if (p2.poweredTimer > 0 && p1.frozenTimer <= 0) {
-                                p1.frozenTimer = 1500;
+                                p1.frozenTimer = POWER_STUN_MS;
                                 if (b.holder === pKeys[i]) { b.holder = null; b.shotMode = false; b.shotOwner = null; b.vx = -nx * 3; b.vy = -ny * 3; b.inAir = true; }
-                                gs.tackleCooldown = 1000;
+                                gs.tackleCooldown = 700;
                                 spawnParticles(p1.x, p1.y, '#ffd700', 12, 4);
                                 showFlash('🥴 SERSEM!', '#ffd700');
                             }
                         }
+                    }
+                }
+            }
+
+            // Teknik şarjlı pas: ilk temas eden (donmamış) oyuncu topu yakalar — çok hızlı da olsa
+            if (b.teknikPassMode && b.holder === null && !b.lobMode) {
+                for (const pid of pKeys) {
+                    const pl = gs.players[pid];
+                    if (pl.frozenTimer > 0) continue;
+                    const pdx = b.x - pl.x, pdy = b.y - pl.y;
+                    if (Math.sqrt(pdx * pdx + pdy * pdy) < pl.r + BALL_R + 4) {
+                        b.holder = pid;
+                        b.vx = 0; b.vy = 0;
+                        b.inAir = false;
+                        b.teknikPassMode = false;
+                        b.shotMode = false; b.shotOwner = null;
+                        b.longPassMode = false; b.longPassOwner = null;
+                        spawnParticles(pl.x, pl.y, pl.color, 16, 4);
+                        showFlash('🎯 KONTROLLÜ PAS!', '#00e5ff');
+                        break;
                     }
                 }
             }
@@ -2082,6 +2306,7 @@
                             b.inAir = false;
                             b.shotMode = false; b.shotOwner = null;
                             b.longPassMode = false; b.longPassOwner = null;
+                            b.teknikPassMode = false;
                             spawnParticles(p.x, p.y, p.color, 6, 2);
                         }
                     }
@@ -2385,6 +2610,7 @@
             b.frozenTimer = 0;
             b.longPassMode = false; b.longPassOwner = null;
             b.shotMode = false; b.shotOwner = null;
+            b.teknikPassMode = false;
             b.invisTimer = 0;
 
             ['p1', 'p2'].forEach(pid => {
@@ -2412,6 +2638,10 @@
                 p.geopasActive = false;
                 p.geopasTimer = 0;
                 p.shotActiveTimer = 0;
+                p.passCharging = false;
+                p.passChargeMs = 0;
+                p.longPassCharging = false;
+                p.longPassChargeMs = 0;
                 if (p.wallPreview) p.wallPreview.active = false;
             });
 
@@ -3278,39 +3508,96 @@
 
         function initSkillSelection() {
             document.getElementById('skill-selection-overlay').classList.remove('hidden');
+            p1Profile = null; p2Profile = null;
             p1SelectedSkills = [];
             p2SelectedSkills = [];
 
-            const p1Pool = document.getElementById('p1-skill-pool');
-            const p2Pool = document.getElementById('p2-skill-pool');
-            p1Pool.innerHTML = ''; p2Pool.innerHTML = '';
-
-            ALL_SKILLS.forEach(sk => {
-                const p1Card = document.createElement('div');
-                p1Card.className = 'skill-card';
-                p1Card.style.color = sk.color;
-                p1Card.innerHTML = `<div class="skill-icon">${sk.icon}</div><div class="skill-name">${sk.name}</div>`;
-                p1Card.onclick = () => toggleSkill('p1', sk, p1Card);
-                p1Pool.appendChild(p1Card);
-
-                const p2Card = document.createElement('div');
-                p2Card.className = 'skill-card';
-                p2Card.style.color = sk.color;
-                p2Card.innerHTML = `<div class="skill-icon">${sk.icon}</div><div class="skill-name">${sk.name}</div>`;
-                p2Card.onclick = () => toggleSkill('p2', sk, p2Card);
-                p2Pool.appendChild(p2Card);
+            ['p1', 'p2'].forEach(pid => {
+                const profileRow = document.getElementById(`${pid}-profile-row`);
+                profileRow.innerHTML = '';
+                PROFILES.forEach(prof => {
+                    const card = document.createElement('div');
+                    card.className = 'profile-card';
+                    card.style.color = prof.color;
+                    card.innerHTML = `<div class="profile-icon">${prof.icon}</div><div class="profile-name">${prof.name}</div>`;
+                    card.onclick = () => selectProfile(pid, prof);
+                    profileRow.appendChild(card);
+                });
+                document.getElementById(`${pid}-skill-pool`).innerHTML = '';
+                document.getElementById(`${pid}-pick-hint`).textContent = 'Sınıf seçin';
             });
             updateSkillSelectionUI();
         }
 
-        function toggleSkill(pid, sk, cardEl) {
+        function selectProfile(pid, prof) {
+            if (pid === 'p1') { p1Profile = prof; p1SelectedSkills = []; }
+            else { p2Profile = prof; p2SelectedSkills = []; }
+
+            // Highlight selected profile card
+            const profileRow = document.getElementById(`${pid}-profile-row`);
+            Array.from(profileRow.children).forEach((c, i) => {
+                c.classList.toggle('selected', PROFILES[i].id === prof.id);
+            });
+
+            // Slot containerını dinamik kur
+            renderSkillSlots(pid, prof.slots);
+
+            // Build skill pool from profile's allowed skills
+            const pool = document.getElementById(`${pid}-skill-pool`);
+            pool.innerHTML = '';
+            const skills = prof.skills.map(id => ALL_SKILLS.find(s => s.id === id)).filter(Boolean);
+            const hint = document.getElementById(`${pid}-pick-hint`);
+            const pickCount = prof.slots;
+
+            if (skills.length <= pickCount) {
+                if (pid === 'p1') p1SelectedSkills = skills.slice();
+                else p2SelectedSkills = skills.slice();
+                hint.textContent = 'Sınıf skilleri otomatik atandı';
+                skills.forEach(sk => {
+                    const card = createSkillCard(sk);
+                    card.classList.add('selected', 'locked');
+                    pool.appendChild(card);
+                });
+            } else {
+                hint.textContent = `${skills.length} skilden ${pickCount} tane seç`;
+                skills.forEach(sk => {
+                    const card = createSkillCard(sk);
+                    card.onclick = () => toggleSkill(pid, sk, card, pickCount);
+                    pool.appendChild(card);
+                });
+            }
+            updateSkillSelectionUI();
+        }
+
+        function renderSkillSlots(pid, count) {
+            const cont = document.getElementById(`${pid}-selected-skills`);
+            cont.innerHTML = '';
+            for (let i = 0; i < count; i++) {
+                const slot = document.createElement('div');
+                slot.className = 'selected-slot';
+                slot.id = `${pid}-slot-${i}`;
+                cont.appendChild(slot);
+            }
+        }
+
+        function createSkillCard(sk) {
+            const card = document.createElement('div');
+            card.className = 'skill-card';
+            card.style.color = sk.color;
+            card.dataset.skillId = sk.id;
+            card.innerHTML = `<div class="skill-icon">${sk.icon}</div><div class="skill-name">${sk.name}</div>`;
+            return card;
+        }
+
+        function toggleSkill(pid, sk, cardEl, maxPick) {
             const arr = pid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+            const limit = maxPick || ((pid === 'p1' ? p1Profile : p2Profile)?.slots) || 3;
             const idx = arr.findIndex(s => s.id === sk.id);
             if (idx !== -1) {
                 arr.splice(idx, 1);
                 cardEl.classList.remove('selected');
             } else {
-                if (arr.length >= 3) return;
+                if (arr.length >= limit) return;
                 arr.push(sk);
                 cardEl.classList.add('selected');
             }
@@ -3318,18 +3605,23 @@
         }
 
         function updateSkillSelectionUI() {
-            for (let i = 0; i < 3; i++) {
-                const s1 = p1SelectedSkills[i];
-                document.getElementById(`p1-slot-${i}`).innerHTML = s1 ? s1.icon : '';
-                document.getElementById(`p1-slot-${i}`).style.borderColor = s1 ? s1.color : 'rgba(255,255,255,0.3)';
-
-                const s2 = p2SelectedSkills[i];
-                document.getElementById(`p2-slot-${i}`).innerHTML = s2 ? s2.icon : '';
-                document.getElementById(`p2-slot-${i}`).style.borderColor = s2 ? s2.color : 'rgba(255,255,255,0.3)';
-            }
+            ['p1', 'p2'].forEach(pid => {
+                const prof = pid === 'p1' ? p1Profile : p2Profile;
+                const arr = pid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+                const slots = prof ? prof.slots : 0;
+                for (let i = 0; i < slots; i++) {
+                    const slotEl = document.getElementById(`${pid}-slot-${i}`);
+                    if (!slotEl) continue;
+                    const s = arr[i];
+                    slotEl.innerHTML = s ? s.icon : '';
+                    slotEl.style.borderColor = s ? s.color : 'rgba(255,255,255,0.3)';
+                }
+            });
 
             const btn = document.getElementById('confirm-skills-btn');
-            btn.disabled = (p1SelectedSkills.length < 3 || p2SelectedSkills.length < 3);
+            const p1Need = p1Profile ? p1Profile.slots : 99;
+            const p2Need = p2Profile ? p2Profile.slots : 99;
+            btn.disabled = (!p1Profile || !p2Profile || p1SelectedSkills.length < p1Need || p2SelectedSkills.length < p2Need);
         }
 
         function confirmSkills() {
@@ -3347,11 +3639,13 @@
 
             initState();
 
-            // Assign selected abilities and keys
-            const p1Keys = ['KeyQ', 'KeyE', 'KeyR'];
-            const p2Keys = ['KeyU', 'KeyI', 'KeyO'];
+            // Assign selected abilities and keys (4. slot için T/Y eklendi)
+            const p1Keys = ['KeyQ', 'KeyE', 'KeyR', 'KeyT'];
+            const p2Keys = ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
             gs.players.p1.abilities = p1SelectedSkills.map((sk, i) => ({ ...sk, key: p1Keys[i], cdLeft: 0, active: false }));
             gs.players.p2.abilities = p2SelectedSkills.map((sk, i) => ({ ...sk, key: p2Keys[i], cdLeft: 0, active: false }));
+            gs.players.p1.profile = p1Profile;
+            gs.players.p2.profile = p2Profile;
 
             buildHUD();
 
