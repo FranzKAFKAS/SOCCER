@@ -377,11 +377,14 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
             background: rgba(10, 10, 26, 0.98);
             z-index: 20;
-            gap: 20px;
+            gap: 14px;
             transition: opacity 0.4s;
+            padding: 16px 16px 24px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
         }
 
         #skill-selection-overlay.hidden {
@@ -391,17 +394,18 @@
 
         #skill-selection-overlay h2 {
             font-family: 'Orbitron', monospace;
-            font-size: 2.2rem;
+            font-size: 1.6rem;
             font-weight: 900;
             color: #fff;
             letter-spacing: 4px;
+            margin: 0;
         }
 
         .selection-container {
             display: flex;
-            gap: 40px;
-            width: 90%;
-            max-width: 800px;
+            gap: 24px;
+            width: 100%;
+            max-width: 820px;
         }
 
         .player-selection {
@@ -409,23 +413,23 @@
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 12px;
-            padding: 20px;
+            padding: 14px;
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 12px;
         }
 
         .skill-pool {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+            gap: 8px;
         }
 
         .skill-card {
             background: rgba(255, 255, 255, 0.05);
             border: 2px solid transparent;
             border-radius: 8px;
-            padding: 10px 5px;
+            padding: 8px 4px;
             text-align: center;
             cursor: pointer;
             transition: all 0.2s;
@@ -442,48 +446,51 @@
         }
 
         .skill-icon {
-            font-size: 24px;
-            margin-bottom: 5px;
+            font-size: 20px;
+            margin-bottom: 3px;
         }
 
         .skill-name {
-            font-size: 10px;
+            font-size: 9px;
             font-family: 'Orbitron', monospace;
             color: #fff;
+            line-height: 1.1;
         }
 
         .selected-skills {
             display: flex;
-            gap: 10px;
+            gap: 8px;
             justify-content: center;
             margin-top: auto;
-            padding-top: 15px;
+            padding-top: 10px;
             border-top: 1px dashed rgba(255, 255, 255, 0.2);
         }
 
         .selected-slot {
-            width: 40px;
-            height: 40px;
+            width: 36px;
+            height: 36px;
             border: 2px dashed rgba(255, 255, 255, 0.3);
             border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 18px;
         }
 
         #confirm-skills-btn {
             background: linear-gradient(135deg, #7b2fff, #00d4ff);
             border: none;
             border-radius: 10px;
-            padding: 14px 48px;
+            padding: 12px 40px;
             font-family: 'Orbitron', monospace;
-            font-size: 1rem;
+            font-size: 0.95rem;
             font-weight: 700;
             letter-spacing: 3px;
             color: #fff;
             cursor: pointer;
             transition: transform 0.15s, box-shadow 0.15s, opacity 0.3s;
+            flex-shrink: 0;
+            margin-top: 4px;
         }
 
         #confirm-skills-btn:disabled {
@@ -659,6 +666,7 @@
         const BALL_FRICTION = 0.93;
         const THROW_SPEED = 7;
         const THROW_SPEED_LOB = 5;
+        const SHOT_GOAL_H = 100;
 
         // ─────────────── ABILITY DEFS ───────────────
         const ALL_SKILLS = [
@@ -670,8 +678,13 @@
             { id: 'reverse', icon: '🔀', name: 'Yön Tersle', cd: 8000, duration: 4000, color: '#ff88bb' },
             { id: 'lob', icon: '🚀', name: 'Aşırtma', cd: 7000, duration: 0, color: '#ffaa00' },
             { id: 'sloworb', icon: '🔮', name: 'Buz Küresi', cd: 9000, duration: 5000, color: '#33ffaa' },
-            { id: 'grow', icon: '🐘', name: 'Büyü', cd: 10000, duration: 4000, color: '#ffaaee' },
-            { id: 'shrink', icon: '🐁', name: 'Küçül', cd: 10000, duration: 4000, color: '#aaffaa' },
+            { id: 'geopas', icon: '📐', name: 'Geom. Pas', cd: 7000, duration: 3000, color: '#ff9900' },
+            { id: 'speedboost', icon: '🏎️', name: 'Hız Boost', cd: 8000, duration: 3000, color: '#00ffff' },
+            { id: 'longpass', icon: '🏹', name: 'Uzun Pas', cd: 6000, duration: 0, color: '#ff66ff' },
+            { id: 'invisball', icon: '👻', name: 'Görünmez Top', cd: 10000, duration: 4000, color: '#aaa' },
+            { id: 'blind', icon: '🌑', name: 'Kör Etme', cd: 12000, duration: 3000, color: '#555' },
+            { id: 'shot', icon: '🎯', name: 'Şut', cd: 8000, duration: 5000, color: '#ff4400' },
+            { id: 'wall', icon: '🧱', name: 'Duvar', cd: 12000, duration: 7000, color: '#ff8800' },
             { id: 'smoke', icon: '💨', name: 'Sis', cd: 11000, duration: 6000, color: '#ffffff' },
             { id: 'hook', icon: '🪝', name: 'Halat', cd: 12000, duration: 800, color: '#ffaa33' },
         ];
@@ -702,6 +715,7 @@
                 hookProjectile: null,
                 foulAttempts: { p1: 0, p2: 0 },  // failed tackle attempts per player
                 penaltyMode: null,  // null | { kicker: 'p1'|'p2', keeper: ..., goalX, goalY, active }
+                walls: [],          // [{ side, pos, owner, life }]
 
                 ball: {
                     x: W / 2, y: H / 2,
@@ -713,6 +727,9 @@
                     lobFrom: null, lobTo: null,
                     frozenTimer: 0,
                     shadow: 0,            // for lob arc
+                    longPassMode: false, longPassOwner: null,
+                    shotMode: false, shotOwner: null,
+                    invisTimer: 0,
                 },
 
                 players: {
@@ -742,6 +759,7 @@
                         pulledBy: null,
                         lastDirX: 1, lastDirY: 0,
                         abilities: [],
+                        speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
                     },
                     p2: {
                         x: PLAY_RIGHT - 60, y: H / 2,
@@ -769,12 +787,16 @@
                         pulledBy: null,
                         lastDirX: -1, lastDirY: 0,
                         abilities: [],
+                        speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
                     },
                 },
             };
 
             gs.players.p1.team = 'p1';
             gs.players.p2.team = 'p2';
+            gs.blindTimer = 0;
+            gs.blindOwner = null;
+            gs.invisBallTimer = 0;
 
             const yOffsets = gameModeSize === 2 ? [120] : (gameModeSize === 3 ? [120, -120] : []);
             yOffsets.forEach((off, idx) => {
@@ -785,7 +807,8 @@
                     clones: [], controlsReversedTimer: 0, lobPending: false, lobCharging: false,
                     lobChargeTimer: 0, slowOrbCharging: false, slowOrbChargeTimer: 0, smokeCharging: false,
                     smokeChargeTimer: 0, growTimer: 0, shrinkTimer: 0, pullingTimer: 0, pulledBy: null,
-                    lastDirX: 1, lastDirY: 0, abilities: [], team: 'p1', isBot: true
+                    lastDirX: 1, lastDirY: 0, abilities: [], team: 'p1', isBot: true,
+                    speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
                 };
                 gs.players[`p2_bot${idx + 1}`] = {
                     x: PLAY_RIGHT - 60, y: H / 2 + off,
@@ -794,7 +817,8 @@
                     clones: [], controlsReversedTimer: 0, lobPending: false, lobCharging: false,
                     lobChargeTimer: 0, slowOrbCharging: false, slowOrbChargeTimer: 0, smokeCharging: false,
                     smokeChargeTimer: 0, growTimer: 0, shrinkTimer: 0, pullingTimer: 0, pulledBy: null,
-                    lastDirX: -1, lastDirY: 0, abilities: [], team: 'p2', isBot: true
+                    lastDirX: -1, lastDirY: 0, abilities: [], team: 'p2', isBot: true,
+                    speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
                 };
             });
         }
@@ -898,7 +922,51 @@
         function useAbility(pid, idx) {
             const p = gs.players[pid];
             const ab = p.abilities[idx];
-            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            if (!ab) return;
+
+            // Wall: ön izleme aktifken her tuş 1/3'ü değiştirir (cooldown bypass)
+            if (ab.id === 'wall' && p.wallPreview && p.wallPreview.active) {
+                p.wallPreview.pos = (p.wallPreview.pos + 1) % 3;
+                p.wallPreview.holdMs = 0;
+                p.wallPreview.timeoutMs = 5000;
+                const labels = ['ÜST 1/3', 'ORTA 1/3', 'ALT 1/3'];
+                showFlash('🧱 ' + labels[p.wallPreview.pos], ab.color);
+                spawnParticles(p.x, p.y, ab.color, 6, 2);
+                return;
+            }
+
+            // Geopas: ikinci tuş yönlendirme (cooldown bypass)
+            if (ab.id === 'geopas' && p.geopasActive) {
+                p.geopasActive = false;
+                ab.active = false;
+                ab.cdLeft = ab.cd;
+                const b = gs.ball;
+                if (b.holder === null && !b.lobMode) {
+                    const bspeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+                    if (bspeed > 0.5) {
+                        const goalDir = pid === 'p1' ? 1 : -1;
+                        const r1vx = b.vy, r1vy = -b.vx;
+                        const r2vx = -b.vy, r2vy = b.vx;
+                        const useR1 = (r1vx * goalDir >= r2vx * goalDir);
+                        const nvx = useR1 ? r1vx : r2vx;
+                        const nvy = useR1 ? r1vy : r2vy;
+                        const nlen = Math.sqrt(nvx * nvx + nvy * nvy) || 1;
+                        // Yumuşak hız, bouncy (longPassMode)
+                        const geoSpeed = PASS_SPEED * 0.85;
+                        b.vx = (nvx / nlen) * geoSpeed;
+                        b.vy = (nvy / nlen) * geoSpeed;
+                        b.inAir = true;
+                        b.longPassMode = true;
+                        b.longPassOwner = pid;
+                        b.shotMode = false; b.shotOwner = null;
+                    }
+                }
+                spawnParticles(gs.ball.x, gs.ball.y, ab.color, 25, 7);
+                showFlash('📐 SAPTIRILDI!', ab.color);
+                return;
+            }
+
+            if (ab.cdLeft > 0 || p.frozenTimer > 0) return;
 
             if (ab.id === 'clone') {
                 ab.active = true;
@@ -972,22 +1040,6 @@
                 spawnParticles(p.x, p.y, ab.color, 18, 5);
                 showFlash('🔀 TERSLE!', ab.color);
             }
-            else if (ab.id === 'grow') {
-                ab.active = true;
-                ab.cdLeft = ab.cd;
-                p.growTimer = ab.duration;
-                p.shrinkTimer = 0; // cancel opposite
-                spawnParticles(p.x, p.y, ab.color, 20, 5);
-                showFlash('🐘 BÜYÜ!', ab.color);
-            }
-            else if (ab.id === 'shrink') {
-                ab.active = true;
-                ab.cdLeft = ab.cd;
-                p.shrinkTimer = ab.duration;
-                p.growTimer = 0; // cancel opposite
-                spawnParticles(p.x, p.y, ab.color, 20, 5);
-                showFlash('🐁 KÜÇÜL!', ab.color);
-            }
             else if (ab.id === 'hook') {
                 ab.active = true;
                 ab.cdLeft = ab.cd;
@@ -1001,6 +1053,100 @@
                 spawnParticles(p.x, p.y, ab.color, 15, 4);
                 showFlash('🪝 HALAT!', ab.color);
             }
+            else if (ab.id === 'geopas') {
+                if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+                ab.active = true;
+                p.geopasActive = true;
+                p.geopasTimer = ab.duration;
+                const b = gs.ball;
+                b.holder = null;
+                b.inAir = true;
+                b.vx = p.lastDirX * PASS_SPEED;
+                b.vy = p.lastDirY * PASS_SPEED;
+                b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+                b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+                spawnParticles(b.x, b.y, ab.color, 15, 4);
+                showFlash('📐 GEOMETRİK PAS!', ab.color);
+            }
+            else if (ab.id === 'speedboost') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                p.speedBoostTimer = ab.duration;
+                spawnParticles(p.x, p.y, ab.color, 20, 6);
+                showFlash('🏎️ HIZ BOOST!', ab.color);
+            }
+            else if (ab.id === 'longpass') {
+                if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const b = gs.ball;
+                b.holder = null;
+                b.inAir = true;
+                b.longPassMode = true;
+                b.longPassOwner = pid;
+                const lpSpeed = PASS_SPEED * 1.4;
+                b.vx = p.lastDirX * lpSpeed;
+                b.vy = p.lastDirY * lpSpeed;
+                b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+                b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+                spawnParticles(b.x, b.y, ab.color, 20, 5);
+                showFlash('🏹 UZUN PAS!', ab.color);
+            }
+            else if (ab.id === 'invisball') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                gs.invisBallTimer = ab.duration;
+                spawnParticles(p.x, p.y, '#aaa', 15, 3);
+                showFlash('👻 GÖRÜNMEZ TOP!', '#aaa');
+            }
+            else if (ab.id === 'blind') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                gs.blindTimer = ab.duration;
+                gs.blindOwner = pid;
+                spawnParticles(p.x, p.y, '#555', 20, 4);
+                showFlash('🌑 KÖR ETME!', '#ffffff');
+            }
+            else if (ab.id === 'shot') {
+                if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const b = gs.ball;
+                b.holder = null;
+                b.inAir = true;
+                const shotSpeed = PASS_SPEED * 1.6;
+                b.vx = p.lastDirX * shotSpeed;
+                b.vy = p.lastDirY * shotSpeed;
+                b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+                b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+                b.shotMode = true;
+                b.shotOwner = pid;
+                spawnParticles(b.x, b.y, ab.color, 25, 7);
+                showFlash('🎯 ŞUT!', ab.color);
+            }
+            else if (ab.id === 'wall') {
+                p.wallPreview = { active: true, pos: 0, holdMs: 0, timeoutMs: 5000 };
+                ab.active = true;
+                spawnParticles(p.x, p.y, ab.color, 10, 3);
+                showFlash('🧱 ÜST 1/3', ab.color);
+            }
+        }
+
+        function placeWall(pid) {
+            const p = gs.players[pid];
+            if (!p || !p.wallPreview || !p.wallPreview.active) return;
+            const ab = p.abilities.find(a => a.id === 'wall');
+            if (!ab) return;
+            const side = (p.team || pid) === 'p1' ? 'left' : 'right';
+            // Aynı sahibe ait önceki duvarı kaldır (tek duvar limit)
+            gs.walls = (gs.walls || []).filter(w => w.owner !== pid);
+            gs.walls.push({ side, pos: p.wallPreview.pos, owner: pid, life: ab.duration });
+            const wx = side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
+            spawnParticles(wx, H / 2, ab.color, 28, 6);
+            showFlash('🧱 DUVAR YERLEŞTİ!', ab.color);
+            ab.cdLeft = ab.cd;
+            ab.active = false;
+            p.wallPreview.active = false;
         }
 
         function executeSelfPass(pid) {
@@ -1155,6 +1301,8 @@
                 b.holder = pid;
                 b.vx = 0; b.vy = 0;
                 b.inAir = false;
+                b.shotMode = false; b.shotOwner = null;
+                b.longPassMode = false; b.longPassOwner = null;
                 spawnParticles(p.x, p.y, p.color, 8, 2);
             }
         }
@@ -1271,7 +1419,7 @@
 
             const goalX = keeperPid === 'p1' ? PLAY_LEFT : PLAY_RIGHT;
             const goalY = H / 2;
-            const GOAL_H = 130;
+            const GOAL_H = SHOT_GOAL_H;
 
             gs.penaltyMode = {
                 kicker: kickerPid,
@@ -1569,27 +1717,43 @@
                 return;
             }
 
-            // Grow / Shrink decay
-            if (p.growTimer > 0) p.growTimer -= dt;
-            if (p.shrinkTimer > 0) p.shrinkTimer -= dt;
+            // Reset radius to base
+            p.r = PLAYER_R;
 
-            // Target scale
-            let targetScale = 1.0;
-            if (p.growTimer > 0) targetScale = 1.7;
-            else if (p.shrinkTimer > 0) targetScale = 0.55;
+            // Speed boost decay
+            if (p.speedBoostTimer > 0) p.speedBoostTimer -= dt;
 
-            // Smoothly interpolate radius (frame-rate independent)
-            const currentScale = p.r / PLAYER_R;
-            if (Math.abs(currentScale - targetScale) > 0.01) {
-                const resizeDir = targetScale > currentScale ? 1 : -1;
-                const resizeStep = resizeDir * 0.005 * dt * PLAYER_R;
-                p.r += resizeStep;
-                // Clamp to prevent overshoot
-                if ((resizeDir > 0 && p.r > targetScale * PLAYER_R) || (resizeDir < 0 && p.r < targetScale * PLAYER_R)) {
-                    p.r = targetScale * PLAYER_R;
+            // Shot active decay
+            if (p.shotActiveTimer > 0) p.shotActiveTimer -= dt;
+
+            // Geopas second-press window
+            if (p.geopasActive && p.geopasTimer > 0) {
+                p.geopasTimer -= dt;
+                if (p.geopasTimer <= 0) {
+                    p.geopasActive = false;
+                    const gab = p.abilities.find(a => a.id === 'geopas');
+                    if (gab && gab.active) { gab.active = false; gab.cdLeft = gab.cd; }
                 }
-            } else {
-                p.r = targetScale * PLAYER_R;
+            }
+
+            // Wall: hold-to-place detection
+            if (p.wallPreview && p.wallPreview.active) {
+                const wAb = p.abilities.find(a => a.id === 'wall');
+                if (wAb) {
+                    p.wallPreview.timeoutMs -= dt;
+                    if (keys[wAb.key]) {
+                        p.wallPreview.holdMs += dt;
+                        if (p.wallPreview.holdMs >= 380) {
+                            placeWall(pid);
+                        }
+                    } else {
+                        p.wallPreview.holdMs = 0;
+                    }
+                    if (p.wallPreview && p.wallPreview.active && p.wallPreview.timeoutMs <= 0) {
+                        p.wallPreview.active = false;
+                        wAb.active = false;
+                    }
+                }
             }
 
             // slide
@@ -1620,8 +1784,8 @@
             const zoneSlow = inSlowZone ? 0.35 : 1.0;
 
             // Scale speed: bigger = slower, smaller = faster
-            const sizeSpeedMod = p.growTimer > 0 ? 0.65 : (p.shrinkTimer > 0 ? 1.45 : 1.0);
-            const speed = PLAYER_SPEED * (gs.ball.holder === pid ? 0.8 : 1) * (p.poweredTimer > 0 ? 1.4 : 1) * zoneSlow * sizeSpeedMod;
+            const speedBoostMod = p.speedBoostTimer > 0 ? 1.9 : 1.0;
+            const speed = PLAYER_SPEED * (gs.ball.holder === pid ? 0.8 : 1) * (p.poweredTimer > 0 ? 1.4 : 1) * zoneSlow * speedBoostMod;
 
             // Gamepad input mapping
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -1798,8 +1962,8 @@
             b.x += b.vx;
             b.y += b.vy;
 
-            // No friction during penalty shot so it always reaches the goal line
-            if (!(gs.penaltyMode && gs.penaltyMode.shot)) {
+            // No friction during penalty shot, long pass mode, or shot mode
+            if (!(gs.penaltyMode && gs.penaltyMode.shot) && !b.longPassMode && !b.shotMode) {
                 b.vx *= BALL_FRICTION;
                 b.vy *= BALL_FRICTION;
             }
@@ -1807,10 +1971,14 @@
             // wall bounce — elastic with 0.82 restitution for satisfying feel
             // Skip bounce during penalty shot so ball can enter net area properly
             if (!(gs.penaltyMode && gs.penaltyMode.shot)) {
-                if (b.x - BALL_R < FIELD_LEFT) { b.x = FIELD_LEFT + BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); }
-                if (b.x + BALL_R > FIELD_RIGHT) { b.x = FIELD_RIGHT - BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); }
-                if (b.y - BALL_R < FIELD_TOP) { b.y = FIELD_TOP + BALL_R; b.vy *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); }
-                if (b.y + BALL_R > FIELD_BOTTOM) { b.y = FIELD_BOTTOM - BALL_R; b.vy *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); }
+                const clearFastModes = () => {
+                    if (b.longPassMode) { b.longPassMode = false; b.longPassOwner = null; }
+                    if (b.shotMode) { b.shotMode = false; b.shotOwner = null; }
+                };
+                if (b.x - BALL_R < FIELD_LEFT) { b.x = FIELD_LEFT + BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
+                if (b.x + BALL_R > FIELD_RIGHT) { b.x = FIELD_RIGHT - BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
+                if (b.y - BALL_R < FIELD_TOP) { b.y = FIELD_TOP + BALL_R; b.vy *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
+                if (b.y + BALL_R > FIELD_BOTTOM) { b.y = FIELD_BOTTOM - BALL_R; b.vy *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
             }
 
             if (Math.abs(b.vx) < 0.1) b.vx = 0;
@@ -1853,7 +2021,50 @@
                                 spawnParticles(p1.x, p1.y, '#ffd700', 20, 6);
                                 showFlash('🔥 YIKILDI!', '#ffd700');
                             }
+                            // Güç skilli: temasa sersemletme
+                            if (p1.poweredTimer > 0 && p2.frozenTimer <= 0) {
+                                p2.frozenTimer = 1500;
+                                if (b.holder === pKeys[j]) { b.holder = null; b.shotMode = false; b.shotOwner = null; b.vx = nx * 3; b.vy = ny * 3; b.inAir = true; }
+                                gs.tackleCooldown = 1000;
+                                spawnParticles(p2.x, p2.y, '#ffd700', 12, 4);
+                                showFlash('🥴 SERSEM!', '#ffd700');
+                            } else if (p2.poweredTimer > 0 && p1.frozenTimer <= 0) {
+                                p1.frozenTimer = 1500;
+                                if (b.holder === pKeys[i]) { b.holder = null; b.shotMode = false; b.shotOwner = null; b.vx = -nx * 3; b.vy = -ny * 3; b.inAir = true; }
+                                gs.tackleCooldown = 1000;
+                                spawnParticles(p1.x, p1.y, '#ffd700', 12, 4);
+                                showFlash('🥴 SERSEM!', '#ffd700');
+                            }
                         }
+                    }
+                }
+            }
+
+            // Long pass ball-player collision
+            if (b.longPassMode) {
+                for (const pid of pKeys) {
+                    if (pid === b.longPassOwner) continue;
+                    const p = gs.players[pid];
+                    const ldx = b.x - p.x, ldy = b.y - p.y;
+                    const ldist = Math.sqrt(ldx * ldx + ldy * ldy);
+                    if (ldist < p.r + BALL_R + 4) {
+                        const ownerPlayer = gs.players[b.longPassOwner];
+                        if (ownerPlayer && ownerPlayer.team === p.team) {
+                            b.holder = pid; b.vx = 0; b.vy = 0; b.inAir = false;
+                            b.longPassMode = false; b.longPassOwner = null;
+                            b.shotMode = false; b.shotOwner = null;
+                            spawnParticles(p.x, p.y, p.color, 15, 4);
+                            showFlash('🏹 YAKALADIM!', p.color);
+                        } else {
+                            const lnx = ldist > 0 ? ldx / ldist : 1;
+                            const lny = ldist > 0 ? ldy / ldist : 0;
+                            const bspd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+                            b.vx = lnx * bspd * 0.75; b.vy = lny * bspd * 0.75;
+                            b.longPassMode = false; b.longPassOwner = null;
+                            spawnParticles(p.x, p.y, '#ff66ff', 15, 5);
+                            showFlash('🏹 ENGELLENDİ!', '#ff66ff');
+                        }
+                        break;
                     }
                 }
             }
@@ -1869,6 +2080,8 @@
                             b.holder = pid;
                             b.vx = 0; b.vy = 0;
                             b.inAir = false;
+                            b.shotMode = false; b.shotOwner = null;
+                            b.longPassMode = false; b.longPassOwner = null;
                             spawnParticles(p.x, p.y, p.color, 6, 2);
                         }
                     }
@@ -2068,15 +2281,83 @@
             ['p1', 'p2'].forEach(pid => {
                 const p = gs.players[pid];
                 if (b.holder === pid) {
-                    if (pid === 'p1' && p.x > PLAY_RIGHT) scorer = 'p1';
-                    if (pid === 'p2' && p.x < PLAY_LEFT) scorer = 'p2';
+                    if (pid === 'p1' && p.x > PLAY_RIGHT) {
+                        const wblock = (gs.walls || []).find(w => w.side === 'right' && yInWallSegment(p.y, w.pos));
+                        if (wblock) {
+                            p.x = PLAY_RIGHT - p.r - 2;
+                            wblock.life = Math.max(0, wblock.life - 500);
+                            spawnParticles(p.x, p.y, '#ff8800', 12, 4);
+                        } else {
+                            scorer = 'p1';
+                        }
+                    }
+                    if (pid === 'p2' && p.x < PLAY_LEFT) {
+                        const wblock = (gs.walls || []).find(w => w.side === 'left' && yInWallSegment(p.y, w.pos));
+                        if (wblock) {
+                            p.x = PLAY_LEFT + p.r + 2;
+                            wblock.life = Math.max(0, wblock.life - 500);
+                            spawnParticles(p.x, p.y, '#ff8800', 12, 4);
+                        } else {
+                            scorer = 'p2';
+                        }
+                    }
                 }
             });
 
-            // Serbest top end zone çizgisine girerse geri sektirilir (sayı olmaz)
-            if (b.holder === null && !b.lobMode) {
-                if (b.x - BALL_R < PLAY_LEFT) { b.x = PLAY_LEFT + BALL_R; b.vx = Math.abs(b.vx) * 0.75; }
-                if (b.x + BALL_R > PLAY_RIGHT) { b.x = PLAY_RIGHT - BALL_R; b.vx = -Math.abs(b.vx) * 0.75; }
+            // Şut modu: küçük kaleye girerse gol, ıskalarsa gol çizgisinden seker
+            if (b.shotMode && b.shotOwner && b.holder === null && !b.lobMode) {
+                const goalTopY = H / 2 - SHOT_GOAL_H / 2;
+                const goalBotY = H / 2 + SHOT_GOAL_H / 2;
+                const inGoalY = b.y > goalTopY && b.y < goalBotY;
+                if (b.shotOwner === 'p1' && b.x + BALL_R > PLAY_RIGHT) {
+                    if (inGoalY) {
+                        const blocker = (gs.walls || []).find(w => w.side === 'right' && yInWallSegment(b.y, w.pos));
+                        if (blocker) {
+                            b.x = PLAY_RIGHT - BALL_R - 4; b.vx = -Math.abs(b.vx) * 0.85;
+                            b.shotMode = false; b.shotOwner = null;
+                            blocker.life = Math.max(0, blocker.life - 1500);
+                            spawnParticles(b.x, b.y, '#ff8800', 22, 6);
+                            showFlash('🛡️ DUVAR ENGELLEDİ!', '#ff8800');
+                        } else {
+                            scorer = 'p1';
+                        }
+                    } else {
+                        b.x = PLAY_RIGHT - BALL_R; b.vx = -Math.abs(b.vx) * 0.75;
+                        b.shotMode = false; b.shotOwner = null;
+                        spawnParticles(b.x, b.y, '#ff4444', 14, 4);
+                        showFlash('💨 ISKA!', '#ff4444');
+                    }
+                } else if (b.shotOwner === 'p2' && b.x - BALL_R < PLAY_LEFT) {
+                    if (inGoalY) {
+                        const blocker = (gs.walls || []).find(w => w.side === 'left' && yInWallSegment(b.y, w.pos));
+                        if (blocker) {
+                            b.x = PLAY_LEFT + BALL_R + 4; b.vx = Math.abs(b.vx) * 0.85;
+                            b.shotMode = false; b.shotOwner = null;
+                            blocker.life = Math.max(0, blocker.life - 1500);
+                            spawnParticles(b.x, b.y, '#ff8800', 22, 6);
+                            showFlash('🛡️ DUVAR ENGELLEDİ!', '#ff8800');
+                        } else {
+                            scorer = 'p2';
+                        }
+                    } else {
+                        b.x = PLAY_LEFT + BALL_R; b.vx = Math.abs(b.vx) * 0.75;
+                        b.shotMode = false; b.shotOwner = null;
+                        spawnParticles(b.x, b.y, '#ff4444', 14, 4);
+                        showFlash('💨 ISKA!', '#ff4444');
+                    }
+                }
+            }
+
+            // Serbest top end zone çizgisine girerse geri sektirilir (şut modu yoksa)
+            if (b.holder === null && !b.lobMode && !b.shotMode) {
+                if (b.x - BALL_R < PLAY_LEFT) {
+                    b.x = PLAY_LEFT + BALL_R; b.vx = Math.abs(b.vx) * 0.75;
+                    if (b.longPassMode) { b.longPassMode = false; b.longPassOwner = null; }
+                }
+                if (b.x + BALL_R > PLAY_RIGHT) {
+                    b.x = PLAY_RIGHT - BALL_R; b.vx = -Math.abs(b.vx) * 0.75;
+                    if (b.longPassMode) { b.longPassMode = false; b.longPassOwner = null; }
+                }
             }
 
             if (scorer) {
@@ -2102,6 +2383,9 @@
             b.inAir = false;
             b.lobMode = false;
             b.frozenTimer = 0;
+            b.longPassMode = false; b.longPassOwner = null;
+            b.shotMode = false; b.shotOwner = null;
+            b.invisTimer = 0;
 
             ['p1', 'p2'].forEach(pid => {
                 const p = gs.players[pid];
@@ -2124,6 +2408,11 @@
                 p.r = PLAYER_R;
                 p.clones = [];
                 p.controlsReversedTimer = 0;
+                p.speedBoostTimer = 0;
+                p.geopasActive = false;
+                p.geopasTimer = 0;
+                p.shotActiveTimer = 0;
+                if (p.wallPreview) p.wallPreview.active = false;
             });
 
             gs.freezeProjectile = null;
@@ -2134,6 +2423,10 @@
             gs.smokeZones = [];
             gs.foulAttempts = { p1: 0, p2: 0 };
             gs.penaltyMode = null;
+            gs.blindTimer = 0;
+            gs.blindOwner = null;
+            gs.invisBallTimer = 0;
+            gs.walls = [];
         }
 
         function endGame(winner) {
@@ -2236,6 +2529,10 @@
             ctx.fillText('P2 GÖL', 0, 0);
             ctx.restore();
 
+            // ── ŞUT KALELERİ (Her zaman görünür) ──
+            drawShotGoal(PLAY_LEFT, H / 2, SHOT_GOAL_H, '#00d4ff', -1);
+            drawShotGoal(PLAY_RIGHT, H / 2, SHOT_GOAL_H, '#ff4d6d', 1);
+
             // ── PENALTY GOAL ──
             if (gs.penaltyMode && gs.penaltyMode.active) {
                 const pm = gs.penaltyMode;
@@ -2293,13 +2590,148 @@
             ctx.stroke();
         }
 
+        // Helper: draw the always-visible shot goal at the end zone line
+        // dir: -1 = sol kale (postlar end zone'a doğru sola uzanır)
+        //      +1 = sağ kale (postlar end zone'a doğru sağa uzanır)
+        function drawShotGoal(x, cy, h, color, dir) {
+            const goalTop = cy - h / 2;
+            const goalBot = cy + h / 2;
+
+            ctx.save();
+
+            // End zone içinde gol bölgesi vurgu dolgusu
+            const endZoneStart = dir === -1 ? FIELD_LEFT : x;
+            const endZoneWidth = dir === -1 ? (x - FIELD_LEFT) : (FIELD_RIGHT - x);
+            const fillGrad = ctx.createLinearGradient(
+                dir === -1 ? endZoneStart : endZoneStart + endZoneWidth, 0,
+                dir === -1 ? endZoneStart + endZoneWidth : endZoneStart, 0
+            );
+            fillGrad.addColorStop(0, color + '00');
+            fillGrad.addColorStop(1, color + '33');
+            ctx.fillStyle = fillGrad;
+            ctx.fillRect(endZoneStart, goalTop, endZoneWidth, h);
+
+            // Üst & alt postlar (end zone içine uzanır)
+            const postLen = 24;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 10;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x, goalTop);
+            ctx.lineTo(x + dir * postLen, goalTop);
+            ctx.moveTo(x, goalBot);
+            ctx.lineTo(x + dir * postLen, goalBot);
+            ctx.stroke();
+
+            // Gol ağzı (kesikli dikey çizgi)
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, goalTop);
+            ctx.lineTo(x, goalBot);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.lineCap = 'butt';
+
+            ctx.restore();
+        }
+
+        // ─────────────── WALL HELPERS & DRAWING ───────────────
+        // Duvar tüm gol çizgisi yüksekliğinin 1/3'ünü kaplar
+        function wallSegmentBounds(pos) {
+            const fullH = FIELD_BOTTOM - FIELD_TOP;
+            const segH = fullH / 3;
+            const top = FIELD_TOP + pos * segH;
+            return { top, bot: top + segH, segH };
+        }
+
+        function yInWallSegment(y, pos) {
+            const seg = wallSegmentBounds(pos);
+            return y >= seg.top && y <= seg.bot;
+        }
+
+        function drawWalls() {
+            // Yerleştirilmiş duvarlar
+            (gs.walls || []).forEach(w => {
+                const x = w.side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
+                const seg = wallSegmentBounds(w.pos);
+                const color = w.owner === 'p1' ? '#00d4ff' : '#ff4d6d';
+                const lifeAlpha = Math.min(1, w.life / 1500);
+                const wW = 14;
+                ctx.save();
+                ctx.globalAlpha = lifeAlpha;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 16;
+                ctx.fillStyle = color;
+                ctx.fillRect(x - wW / 2, seg.top, wW, seg.segH);
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'rgba(255,255,255,0.28)';
+                ctx.fillRect(x - wW / 2, seg.top, wW, 4);
+                ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                ctx.fillRect(x - wW / 2, seg.bot - 4, wW, 4);
+                // Tuğla deseni
+                ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+                ctx.lineWidth = 1.2;
+                const brickH = 14;
+                ctx.beginPath();
+                let row = 0;
+                for (let yy = seg.top + brickH; yy < seg.bot; yy += brickH) {
+                    ctx.moveTo(x - wW / 2, yy);
+                    ctx.lineTo(x + wW / 2, yy);
+                    const offX = (row % 2 === 0) ? -wW / 4 : wW / 4;
+                    ctx.moveTo(x + offX, yy);
+                    ctx.lineTo(x + offX, Math.min(seg.bot, yy + brickH));
+                    row++;
+                }
+                ctx.stroke();
+                ctx.restore();
+            });
+            // Ön izleme (preview)
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                if (!p || !p.wallPreview || !p.wallPreview.active) return;
+                const side = (p.team || pid) === 'p1' ? 'left' : 'right';
+                const x = side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
+                const seg = wallSegmentBounds(p.wallPreview.pos);
+                const color = pid === 'p1' ? '#00d4ff' : '#ff4d6d';
+                const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 180);
+                const wW = 18;
+                ctx.save();
+                ctx.globalAlpha = 0.18 + 0.32 * pulse;
+                ctx.fillStyle = color;
+                ctx.fillRect(x - wW / 2, seg.top, wW, seg.segH);
+                ctx.globalAlpha = 0.9;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([8, 6]);
+                ctx.strokeRect(x - wW / 2, seg.top, wW, seg.segH);
+                ctx.setLineDash([]);
+                // Hold ilerlemesi göstergesi (segmentin sağında dikey bar)
+                const prog = Math.min(1, p.wallPreview.holdMs / 380);
+                if (prog > 0) {
+                    ctx.globalAlpha = 1;
+                    ctx.fillStyle = '#ffd700';
+                    const barH = seg.segH * prog;
+                    const barX = side === 'left' ? x + wW / 2 + 4 : x - wW / 2 - 8;
+                    ctx.fillRect(barX, seg.top + (seg.segH - barH) / 2, 4, barH);
+                }
+                ctx.restore();
+            });
+        }
+
         // Helper: draw a single player body at position (x,y) with given style
         function drawPlayerBody(x, y, r, color, frozenTimer, poweredTimer, label, slideTimer, slideVx, slideVy, pid) {
+            const speedBoostTimer = (gs.players[pid] && gs.players[pid].speedBoostTimer) || 0;
             ctx.save();
             let glowColor = color;
             let glowSize = 20;
             if (poweredTimer > 0) { glowColor = '#ffd700'; glowSize = 35; }
             if (frozenTimer > 0) { glowColor = '#88eeff'; glowSize = 25; }
+            if (speedBoostTimer > 0) { glowColor = '#00ffff'; glowSize = 28; }
             ctx.shadowColor = glowColor;
             ctx.shadowBlur = glowSize;
 
@@ -2339,6 +2771,15 @@
                 ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 20;
                 ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.fill();
                 ctx.globalAlpha = 1;
+            }
+            if (speedBoostTimer > 0) {
+                const pulse = 0.4 + 0.4 * Math.sin(Date.now() / 70);
+                ctx.globalAlpha = pulse;
+                ctx.strokeStyle = '#00ffff';
+                ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 18;
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(x, y, r + 8, 0, Math.PI * 2); ctx.stroke();
+                ctx.globalAlpha = 1; ctx.shadowBlur = 0;
             }
             ctx.restore();
         }
@@ -2385,6 +2826,9 @@
         function drawBall() {
             const b = gs.ball;
 
+            // Görünmez top: çizimi atla
+            if (gs.invisBallTimer > 0) return;
+
             ctx.save();
 
             // Lob landing shadow
@@ -2424,8 +2868,8 @@
             }
 
             // Ball glow
-            ctx.shadowColor = '#ffee00';
-            ctx.shadowBlur = b.holder ? 12 : 25;
+            ctx.shadowColor = b.longPassMode ? '#ff66ff' : '#ffee00';
+            ctx.shadowBlur = b.longPassMode ? 35 : (b.holder ? 12 : 25);
 
             // Ball body
             const ballGrad = ctx.createRadialGradient(b.x - 3, b.y - 3, 1, b.x, b.y, effectiveR);
@@ -2769,6 +3213,16 @@
             });
         }
 
+        // ─────────────── GLOBAL EFFECTS ───────────────
+        function updateEffects(dt) {
+            if (gs.blindTimer > 0) gs.blindTimer -= dt;
+            if (gs.invisBallTimer > 0) gs.invisBallTimer -= dt;
+            if (gs.walls && gs.walls.length) {
+                gs.walls.forEach(w => { w.life -= dt; });
+                gs.walls = gs.walls.filter(w => w.life > 0);
+            }
+        }
+
         // ─────────────── MAIN LOOP ───────────────
         let lastTime = 0;
         function gameLoop(ts) {
@@ -2791,17 +3245,27 @@
             checkGoal();
             updateParticles(dt);
             updateHUD(dt);
+            updateEffects(dt);
 
             // Draw — players first, ball on top so it's always visible
             drawField();
             drawSlowZones();
             drawFreezeProjectile();
             drawHook();
+            drawWalls();
             Object.keys(gs.players).forEach(pid => drawPlayer(pid));
             drawBall();
             drawSmokeZones();
             drawParticles();
             drawPenaltyBar();
+
+            // Kör etme etkisi: sahayı siyaha bürü
+            if (gs.blindTimer > 0) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.96)';
+                ctx.fillRect(0, 0, W, H);
+                ctx.restore();
+            }
 
             animId = requestAnimationFrame(gameLoop);
         }
