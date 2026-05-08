@@ -959,7 +959,7 @@
             { id: 'lob', icon: '🚀', name: 'Aşırtma', cd: 7000, duration: 0, color: '#ffaa00' },
             { id: 'sloworb', icon: '🔮', name: 'Buz Küresi', cd: 9000, duration: 5000, color: '#33ffaa' },
             { id: 'geopas', icon: '📐', name: 'Geom. Pas', cd: 7000, duration: 3000, color: '#ff9900' },
-            { id: 'speedboost', icon: '🏎️', name: 'Hız Boost', cd: 8000, duration: 3000, color: '#00ffff' },
+            { id: 'speedboost', icon: '🏎️', name: 'Hız Boost', cd: 8000, duration: 1000, color: '#00ffff' },
             { id: 'longpass', icon: '🏹', name: 'Uzun Pas', cd: 6000, duration: 0, color: '#ff66ff' },
             { id: 'invisball', icon: '👻', name: 'Görünmez Top', cd: 10000, duration: 4000, color: '#aaa' },
             { id: 'blind', icon: '🌑', name: 'Kör Etme', cd: 12000, duration: 3000, color: '#555' },
@@ -2181,7 +2181,7 @@
             // Scale speed: bigger = slower, smaller = faster
             const speedBoostMod = p.speedBoostTimer > 0 ? 1.9 : 1.0;
             const isOfansif = p.profile && p.profile.id === 'ofansif';
-            const profileSpeedMod = isOfansif ? 1.12 : 1.0;
+            const profileSpeedMod = isOfansif ? 1.1 : 1.0;
             // Ofansif: top tutarken yavaşlamaz
             const ballHoldMod = (gs.ball.holder === pid && !isOfansif) ? 0.8 : 1;
             const speed = PLAYER_SPEED * ballHoldMod * (p.poweredTimer > 0 ? 1.4 : 1) * zoneSlow * speedBoostMod * profileSpeedMod;
