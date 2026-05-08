@@ -979,10 +979,42 @@
             });
         }
 
+        // ─────────────── DEBUG EVENT LOGGER ───────────────
+        const gameEventDebug = {
+            enabled: true,
+            logger: null
+        };
+        window.gameEventDebug = gameEventDebug;
+        window.setGameEventLogger = function (fn) {
+            gameEventDebug.logger = typeof fn === 'function' ? fn : null;
+            console.log('[GAME_EVENT] custom logger', gameEventDebug.logger ? 'aktif' : 'kapali');
+        };
+        window.toggleGameEventLogs = function (enabled) {
+            gameEventDebug.enabled = !!enabled;
+            console.log('[GAME_EVENT] console logs', gameEventDebug.enabled ? 'aktif' : 'kapali');
+        };
+
+        function emitGameEvent(type, payload = {}) {
+            const evt = { type, ts: Date.now(), ...payload };
+            if (gameEventDebug.enabled) console.log('[GAME_EVENT]', evt);
+            if (typeof gameEventDebug.logger === 'function') {
+                try { gameEventDebug.logger(evt); }
+                catch (err) { console.warn('[GAME_EVENT] custom logger hata:', err); }
+            }
+        }
+
         // ─────────────── FLASH MESSAGE ───────────────
         function showFlash(msg, color = '#fff') {
+            const msgText = typeof msg === 'string' ? msg : String(msg ?? '');
+            emitGameEvent('flash', { msg: msgText, color });
+            if (msgText.includes('KAPTIRDI') || msgText.includes('ÇALDI')) {
+                emitGameEvent('ball_steal', { msg: msgText, color });
+            }
+            if (msgText.includes('FAUL')) {
+                emitGameEvent('foul', { msg: msgText, color });
+            }
             const el = document.getElementById('flash-msg');
-            el.textContent = msg;
+            el.textContent = msgText;
             el.style.color = color;
             el.style.textShadow = `0 0 40px ${color}`;
             el.style.transition = 'none';
@@ -1787,6 +1819,8 @@
             ['p1', 'p2'].forEach((pid, index) => {
                 const gp = gamepads[index];
                 if (!gp || !gp.connected) return;
+                const p = gs.players[pid];
+                if (!p) return;
 
                 const prev = gpPrevButtons[pid];
                 const pressed = (btnIdx) => gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed;
@@ -1815,7 +1849,7 @@
                 // Button 2 (X/Square): Throw/Pickup
                 if (justPressed(2)) {
                     if (gs.ball.holder === pid) throwBall(pid);
-                    else pickupBall(pid);
+                    else attemptTackle(pid);
                 }
 
                 // Button 4 (L1/LB): Ability 1
