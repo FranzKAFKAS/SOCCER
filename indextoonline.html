@@ -747,6 +747,32 @@
             background: rgba(255, 255, 255, 0.1);
             color: #fff;
         }
+
+        .online-team-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .online-team-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-family: 'Orbitron', monospace;
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.8);
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .online-team-btn.active {
+            background: linear-gradient(135deg, rgba(123, 47, 255, 0.8), rgba(0, 212, 255, 0.8));
+            border-color: rgba(255, 255, 255, 0.6);
+            color: #fff;
+            box-shadow: 0 0 20px rgba(123, 47, 255, 0.45);
+        }
     </style>
 </head>
 
@@ -786,6 +812,11 @@
             MULTIPLAYER</div>
 
         <div style="display:flex; flex-direction:column; align-items:center; gap:16px; margin-top:8px;">
+            <div class="online-team-selector">
+                <button class="online-team-btn active" id="online-team-1" onclick="setOnlineTeamSize(1)">1v1</button>
+                <button class="online-team-btn" id="online-team-2" onclick="setOnlineTeamSize(2)">2v2</button>
+                <button class="online-team-btn" id="online-team-3" onclick="setOnlineTeamSize(3)">3v3</button>
+            </div>
             <button onclick="createRoom()"
                 style="padding:16px 48px; font-size:1.1rem; font-family:'Orbitron'; font-weight:700; cursor:pointer; background:linear-gradient(135deg, #7b2fff, #00d4ff); color:#fff; border:none; border-radius:12px; box-shadow:0 0 30px rgba(123,47,255,0.4); letter-spacing:2px; transition: transform 0.15s, box-shadow 0.15s;"
                 onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 0 50px rgba(123,47,255,0.7)'"
@@ -814,7 +845,7 @@
             ⚡ GRID RUSH</div>
         <div id="display-room-code"
             style="font-family:'Orbitron'; font-size:4rem; font-weight:900; color:#00d4ff; letter-spacing:10px;"></div>
-        <div style="color:rgba(255,255,255,0.5); font-family:'Inter'; font-size:0.9rem;">Arkadaşın bekleniyor...</div>
+        <div id="waiting-status" style="color:rgba(255,255,255,0.5); font-family:'Inter'; font-size:0.9rem;">Oyuncular bekleniyor...</div>
         <div style="color:rgba(255,255,255,0.25); font-family:'Orbitron'; font-size:0.6rem; letter-spacing:2px;">Bu kodu
             arkadaşınla paylaş</div>
     </div>
@@ -3239,7 +3270,7 @@
 
         function drawPlayer(pid) {
             const p = gs.players[pid];
-            const label = pid === 'p1' ? 'P1' : 'P2';
+            const label = String(pid || '').toUpperCase();
 
             // Hide keeper during penalty
             if (gs.penaltyMode && gs.penaltyMode.active && pid === gs.penaltyMode.keeper) return;
@@ -3907,24 +3938,33 @@
         // --- ONLINE LOGIC ---
         const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
         let socket, myPid, myRoomId, allSkills = [], gameStarted = false;
+        let myTeam = 'p1', onlineMaxPlayers = 2;
+        let onlineTeamSize = 1;
+
+        function setOnlineTeamSize(size) {
+            onlineTeamSize = size;
+            document.querySelectorAll('.online-team-btn').forEach(btn => btn.classList.remove('active'));
+            const selectedBtn = document.getElementById(`online-team-${size}`);
+            if (selectedBtn) selectedBtn.classList.add('active');
+        }
 
         function createRoom() {
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 initSocket();
-                socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'create_room' })), { once: true });
+                socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'create_room', teamSize: onlineTeamSize })), { once: true });
                 return;
             }
-            socket.send(JSON.stringify({ type: 'create_room' }));
+            socket.send(JSON.stringify({ type: 'create_room', teamSize: onlineTeamSize }));
         }
         function joinRoom() {
             const code = document.getElementById('room-code-input').value.toUpperCase();
             if (!code) return;
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 initSocket();
-                socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'join_room', roomId: code })), { once: true });
+                socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'join_room', roomId: code, teamSize: onlineTeamSize })), { once: true });
                 return;
             }
-            socket.send(JSON.stringify({ type: 'join_room', roomId: code }));
+            socket.send(JSON.stringify({ type: 'join_room', roomId: code, teamSize: onlineTeamSize }));
         }
 
         function initSocket() {
@@ -3933,32 +3973,46 @@
                 const msg = JSON.parse(e.data);
                 emitGameEvent('socket_message', { msgType: msg.type });
                 if (msg.type === 'room_created') {
-                    myPid = 'p1'; myRoomId = msg.roomId; allSkills = msg.allSkills;
+                    myPid = msg.pid; myRoomId = msg.roomId; allSkills = msg.allSkills;
+                    onlineMaxPlayers = msg.maxPlayers || (msg.teamSize || 1) * 2;
+                    myTeam = Number((myPid || 'p1').replace('p', '')) <= (msg.teamSize || 1) ? 'p1' : 'p2';
+                    onlineTeamSize = msg.teamSize || 1;
+                    setOnlineTeamSize(onlineTeamSize);
                     document.getElementById('lobby').style.display = 'none';
                     const wr = document.getElementById('waiting-room');
                     wr.style.display = 'flex';
                     document.getElementById('display-room-code').textContent = myRoomId;
+                    document.getElementById('waiting-status').textContent = `Oyuncular bekleniyor... (${msg.connectedPlayers || 1}/${onlineMaxPlayers})`;
                 } else if (msg.type === 'room_joined') {
-                    myPid = 'p2'; myRoomId = msg.roomId; allSkills = msg.allSkills;
-                    showSkillSelectionOnline();
-                } else if (msg.type === 'opponent_joined') {
-                    showSkillSelectionOnline();
+                    myPid = msg.pid; myRoomId = msg.roomId; allSkills = msg.allSkills;
+                    onlineMaxPlayers = msg.maxPlayers || (msg.teamSize || 1) * 2;
+                    myTeam = Number((myPid || 'p1').replace('p', '')) <= (msg.teamSize || 1) ? 'p1' : 'p2';
+                    onlineTeamSize = msg.teamSize || 1;
+                    setOnlineTeamSize(onlineTeamSize);
+                    document.getElementById('lobby').style.display = 'none';
+                    const wr = document.getElementById('waiting-room');
+                    wr.style.display = 'flex';
+                    document.getElementById('display-room-code').textContent = myRoomId;
+                    document.getElementById('waiting-status').textContent = `Oyuncular bekleniyor... (${msg.connectedPlayers || 1}/${onlineMaxPlayers})`;
+                } else if (msg.type === 'player_joined') {
+                    document.getElementById('waiting-status').textContent = `Oyuncular bekleniyor... (${msg.connectedPlayers || 1}/${msg.maxPlayers || onlineMaxPlayers})`;
                 } else if (msg.type === 'start') {
                     document.getElementById('skill-selection-overlay').classList.add('hidden');
+                    document.getElementById('waiting-room').style.display = 'none';
                     document.getElementById('game-wrapper').style.display = 'flex';
                     gameStarted = true;
                     resizeGame();
                     requestAnimationFrame(gameLoop);
                 } else if (msg.type === 'state') {
                     gs = msg.gs;
-                    ['p1', 'p2'].forEach(pid => {
-                        const keys = pid === 'p1' ? ['Q', 'E', 'R'] : ['U', 'I', 'O'];
+                    Object.keys(gs.players || {}).forEach(pid => {
+                        const keys = ['Q', 'E', 'R', 'T'];
                         if (gs.players[pid] && gs.players[pid].abilities) {
                             gs.players[pid].abilities.forEach((ab, i) => {
                                 const fullSk = allSkills.find(s => s.id === ab.id);
                                 if (fullSk) {
                                     ab.icon = fullSk.icon;
-                                    ab.key = keys[i];
+                                    ab.key = keys[i] || '';
                                 }
                             });
                         }
@@ -3971,52 +4025,10 @@
                     }
                 } else if (msg.type === 'gameover') {
                     document.getElementById('overlay').classList.remove('hidden');
-                    document.getElementById('overlay').querySelector('h2').textContent = msg.winner === myPid ? 'KAZANDIN!' : (msg.winner === 'draw' ? 'BERABERE!' : 'KAYBETTİN');
+                    document.getElementById('overlay').querySelector('h2').textContent = msg.winnerTeam === myTeam ? 'KAZANDIN!' : (msg.winnerTeam === 'draw' ? 'BERABERE!' : 'KAYBETTİN');
                 } else if (msg.type === 'error') {
                     document.getElementById('error-msg').textContent = msg.msg;
                 }
-            };
-        }
-
-        function showSkillSelectionOnline() {
-            document.getElementById('lobby').style.display = 'none';
-            document.getElementById('waiting-room').style.display = 'none';
-            document.getElementById('game-wrapper').style.display = 'flex';
-
-            // Override the render function to only allow selecting for myPid
-            const originalRender = initSkillSelection;
-            initSkillSelection = function () {
-                originalRender();
-                // Disable clicking on the opponent's side
-                const otherPid = myPid === 'p1' ? 'p2' : 'p1';
-                const pool = document.getElementById(otherPid + '-skill-pool');
-                if (pool) {
-                    pool.style.pointerEvents = 'none';
-                    pool.style.opacity = '0.5';
-                }
-                const sideLabel = document.querySelector('.' + otherPid + '-selection h3');
-                if (sideLabel) sideLabel.textContent += ' (RAKİP SEÇİYOR)';
-            };
-
-            // Override update to only check my skills
-            const originalUpdate = updateSkillSelectionUI;
-            updateSkillSelectionUI = function () {
-                originalUpdate();
-                const btn = document.getElementById('confirm-skills-btn');
-                const mySkills = myPid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
-                btn.disabled = mySkills.length < 3;
-            };
-
-            document.getElementById('skill-selection-overlay').classList.remove('hidden');
-            initSkillSelection();
-
-            const btn = document.getElementById('confirm-skills-btn');
-            btn.onclick = () => {
-                const mySkills = myPid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
-                if (mySkills.length < 3) return;
-                socket.send(JSON.stringify({ type: 'select_skills', skills: mySkills }));
-                btn.textContent = 'RAKİP BEKLENİYOR...';
-                btn.disabled = true;
             };
         }
 
@@ -4040,8 +4052,7 @@
                 drawFreezeProjectile();
                 drawHook();
                 drawWalls();
-                drawPlayer('p1');
-                drawPlayer('p2');
+                Object.keys(gs.players || {}).forEach(pid => drawPlayer(pid));
                 drawBall();
                 drawSmokeZones();
                 updateParticles();
@@ -4063,39 +4074,24 @@
             if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
                 e.preventDefault();
             }
-            if (myPid === 'p1') {
-                if (e.code === 'KeyQ') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 0 }));
-                if (e.code === 'KeyE') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 1 }));
-                if (e.code === 'KeyR') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 2 }));
-                if (e.code === 'KeyT') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 3 }));
-                if (e.code === 'Space') socket.send(JSON.stringify({ type: 'action', action: 'pass' }));
-                if (e.code === 'KeyF') socket.send(JSON.stringify({ type: 'action', action: 'throw' }));
-                if (e.code === 'KeyG') socket.send(JSON.stringify({ type: 'action', action: 'foul_boost' })); // penalty boost
-            } else if (myPid === 'p2') {
-                if (e.code === 'KeyU') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 0 }));
-                if (e.code === 'KeyI') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 1 }));
-                if (e.code === 'KeyO') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 2 }));
-                if (e.code === 'KeyP') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 3 }));
-                if (e.code === 'Enter' || e.code === 'Space') socket.send(JSON.stringify({ type: 'action', action: 'pass' }));
-                if (e.code === 'KeyL' || e.code === 'KeyF') socket.send(JSON.stringify({ type: 'action', action: 'throw' }));
-                if (e.code === 'KeyK') socket.send(JSON.stringify({ type: 'action', action: 'foul_boost' }));
-            }
+            if (e.code === 'KeyQ') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 0 }));
+            if (e.code === 'KeyE') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 1 }));
+            if (e.code === 'KeyR') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 2 }));
+            if (e.code === 'KeyT') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 3 }));
+            if (e.code === 'Enter' || e.code === 'Space') socket.send(JSON.stringify({ type: 'action', action: 'pass' }));
+            if (e.code === 'KeyL' || e.code === 'KeyF') socket.send(JSON.stringify({ type: 'action', action: 'throw' }));
+            if (e.code === 'KeyG' || e.code === 'KeyK') socket.send(JSON.stringify({ type: 'action', action: 'foul_boost' }));
         });
 
         window.addEventListener('keyup', e => {
             if (!gameStarted) return;
             let releasedId = null;
-            if (myPid === 'p1') {
-                if (e.code === 'KeyQ') releasedId = gs.players.p1.abilities[0]?.id;
-                if (e.code === 'KeyE') releasedId = gs.players.p1.abilities[1]?.id;
-                if (e.code === 'KeyR') releasedId = gs.players.p1.abilities[2]?.id;
-                if (e.code === 'KeyT') releasedId = gs.players.p1.abilities[3]?.id;
-            } else if (myPid === 'p2') {
-                if (e.code === 'KeyU') releasedId = gs.players.p2.abilities[0]?.id;
-                if (e.code === 'KeyI') releasedId = gs.players.p2.abilities[1]?.id;
-                if (e.code === 'KeyO') releasedId = gs.players.p2.abilities[2]?.id;
-                if (e.code === 'KeyP') releasedId = gs.players.p2.abilities[3]?.id;
-            }
+            const myPlayer = gs.players && gs.players[myPid];
+            if (!myPlayer) return;
+            if (e.code === 'KeyQ') releasedId = myPlayer.abilities[0]?.id;
+            if (e.code === 'KeyE') releasedId = myPlayer.abilities[1]?.id;
+            if (e.code === 'KeyR') releasedId = myPlayer.abilities[2]?.id;
+            if (e.code === 'KeyT') releasedId = myPlayer.abilities[3]?.id;
             if (releasedId) socket.send(JSON.stringify({ type: 'release_ability', id: releasedId }));
         });
 
