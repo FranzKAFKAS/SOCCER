@@ -2454,6 +2454,38 @@
                 }
             }
 
+            // Shot skill: ball must collide with players and briefly stun on hit.
+            if (b.shotMode && b.holder === null && !b.lobMode) {
+                const SHOT_STUN_MS = 700;
+                const ownerTeam = gs.players[b.shotOwner] ? gs.players[b.shotOwner].team : null;
+                const shotPlayers = Object.keys(gs.players);
+                for (const pid of shotPlayers) {
+                    const p = gs.players[pid];
+                    if (!p || p.frozenTimer > 0) continue;
+                    if (ownerTeam && p.team === ownerTeam) continue;
+                    const sx = b.x - p.x, sy = b.y - p.y;
+                    const hitDist = p.r + BALL_R;
+                    if (Math.sqrt(sx * sx + sy * sy) < hitDist) {
+                        p.frozenTimer = SHOT_STUN_MS;
+                        let nx = sx, ny = sy;
+                        const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
+                        nx /= nlen; ny /= nlen;
+                        const dot = b.vx * nx + b.vy * ny;
+                        b.vx = (b.vx - 2 * dot * nx) * 0.75;
+                        b.vy = (b.vy - 2 * dot * ny) * 0.75;
+                        b.x = p.x + nx * (hitDist + 1);
+                        b.y = p.y + ny * (hitDist + 1);
+                        b.shotMode = false; b.shotOwner = null;
+                        b.longPassMode = false; b.longPassOwner = null;
+                        b.teknikPassMode = false;
+                        b.inAir = true;
+                        spawnParticles(p.x, p.y, '#ff6600', 22, 5);
+                        showFlash('💥 ŞUT ÇARPTI! SERSEM!', '#ff6600');
+                        break;
+                    }
+                }
+            }
+
             // Teknik şarjlı pas: ilk temas eden (donmamış) oyuncu topu yakalar
             if (b.teknikPassMode && b.holder === null && !b.lobMode) {
                 const pKeys = Object.keys(gs.players);
