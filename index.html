@@ -1844,6 +1844,7 @@
         // ─────────────── PHYSICS UPDATE ───────────────
         function updatePlayer(pid, dt) {
             const p = gs.players[pid];
+            const frameScale = Math.max(0.5, Math.min(3, dt / (1000 / 60)));
 
             // cooldowns
             p.abilities.forEach(ab => {
@@ -1940,8 +1941,8 @@
             // slide
             if (p.slideTimer > 0) {
                 p.slideTimer -= dt;
-                p.x += p.slideVx;
-                p.y += p.slideVy;
+                p.x += p.slideVx * frameScale;
+                p.y += p.slideVy * frameScale;
                 p.slideVx *= 0.9;
                 p.slideVy *= 0.9;
                 clampPlayer(p);
@@ -2019,14 +2020,15 @@
 
             const len = Math.sqrt(dx * dx + dy * dy) || 1;
             if (dx !== 0 || dy !== 0) {
-                p.x += (dx / len) * speed;
-                p.y += (dy / len) * speed;
+                const moveStep = speed * frameScale;
+                p.x += (dx / len) * moveStep;
+                p.y += (dy / len) * moveStep;
                 p.lastDirX = dx / len;
                 p.lastDirY = dy / len;
                 // Move clones in perfect sync with real player
                 p.clones.forEach(c => {
-                    c.x += (dx / len) * speed;
-                    c.y += (dy / len) * speed;
+                    c.x += (dx / len) * moveStep;
+                    c.y += (dy / len) * moveStep;
                     c.x = Math.max(FIELD_LEFT + PLAYER_R, Math.min(FIELD_RIGHT - PLAYER_R, c.x));
                     c.y = Math.max(FIELD_TOP + PLAYER_R, Math.min(FIELD_BOTTOM - PLAYER_R, c.y));
                 });

@@ -281,14 +281,15 @@ class Room {
 
   updatePlayer(pid, dt) {
     const p = this.gs.players[pid]; if (this.gs.penaltyMode && this.gs.penaltyMode.active) { if (pid === this.gs.penaltyMode.keeper) return; if (pid === this.gs.penaltyMode.kicker && this.gs.penaltyMode.shot) return; }
+    const frameScale = Math.max(0.5, Math.min(3, dt / (1000 / TICK_RATE)));
     if (p.frozenTimer > 0) { p.frozenTimer -= dt; return; }
     if (p.growTimer > 0) { p.r = PLAYER_R * 1.5; p.growTimer -= dt; } else if (p.shrinkTimer > 0) { p.r = PLAYER_R * 0.65; p.shrinkTimer -= dt; } else { p.r = PLAYER_R; }
-    if (p.pullingTimer > 0) { p.pullingTimer -= dt; const owner = this.gs.players[p.pulledBy]; if (owner) { const pdx = owner.x - p.x, pdy = owner.y - p.y; const pdist = Math.sqrt(pdx * pdx + pdy * pdy); if (pdist > 40) { p.x += (pdx / pdist) * 8; p.y += (pdy / pdist) * 8; } } clampPlayer(p); return; }
-    if (p.slideTimer > 0) { p.slideTimer -= dt; p.x += p.slideVx; p.y += p.slideVy; p.slideVx *= 0.9; p.slideVy *= 0.9; clampPlayer(p); if (this.gs.ball.holder === pid) { this.gs.ball.x = p.x + p.lastDirX * (p.r * 0.7); this.gs.ball.y = p.y + p.lastDirY * (p.r * 0.7); } return; }
+    if (p.pullingTimer > 0) { p.pullingTimer -= dt; const owner = this.gs.players[p.pulledBy]; if (owner) { const pdx = owner.x - p.x, pdy = owner.y - p.y; const pdist = Math.sqrt(pdx * pdx + pdy * pdy); if (pdist > 40) { p.x += (pdx / pdist) * 8 * frameScale; p.y += (pdy / pdist) * 8 * frameScale; } } clampPlayer(p); return; }
+    if (p.slideTimer > 0) { p.slideTimer -= dt; p.x += p.slideVx * frameScale; p.y += p.slideVy * frameScale; p.slideVx *= 0.9; p.slideVy *= 0.9; clampPlayer(p); if (this.gs.ball.holder === pid) { this.gs.ball.x = p.x + p.lastDirX * (p.r * 0.7); this.gs.ball.y = p.y + p.lastDirY * (p.r * 0.7); } return; }
     let dx = p.inputDX || 0, dy = p.inputDY || 0; if (p.controlsReversedTimer > 0) { dx = -dx; dy = -dy; p.controlsReversedTimer -= dt; }
     let slowFactor = 1; this.gs.slowZones.forEach(z => { if (Math.sqrt((p.x - z.x) ** 2 + (p.y - z.y) ** 2) < z.radius) slowFactor = 0.45; });
     const speed = PLAYER_SPEED * slowFactor * (this.gs.ball.holder === pid ? 0.8 : 1) * (p.poweredTimer > 0 ? 1.4 : 1) * (p.growTimer > 0 ? 0.7 : 1) * (p.shrinkTimer > 0 ? 1.35 : 1);
-    const len = Math.sqrt(dx * dx + dy * dy) || 1; if (dx !== 0 || dy !== 0) { p.x += (dx / len) * speed; p.y += (dy / len) * speed; p.lastDirX = dx / len; p.lastDirY = dy / len; if (pid === 'p1') { p.clones.forEach(c => { c.x += (dx / len) * speed; c.y += (dy / len) * speed; c.x = Math.max(FIELD_LEFT + p.r, Math.min(FIELD_RIGHT - p.r, c.x)); c.y = Math.max(FIELD_TOP + p.r, Math.min(FIELD_BOTTOM - p.r, c.y)); }); } }
+    const len = Math.sqrt(dx * dx + dy * dy) || 1; if (dx !== 0 || dy !== 0) { const moveStep = speed * frameScale; p.x += (dx / len) * moveStep; p.y += (dy / len) * moveStep; p.lastDirX = dx / len; p.lastDirY = dy / len; if (pid === 'p1') { p.clones.forEach(c => { c.x += (dx / len) * moveStep; c.y += (dy / len) * moveStep; c.x = Math.max(FIELD_LEFT + p.r, Math.min(FIELD_RIGHT - p.r, c.x)); c.y = Math.max(FIELD_TOP + p.r, Math.min(FIELD_BOTTOM - p.r, c.y)); }); } }
     if (pid === 'p1') p.clones = p.clones.filter(c => { c.life -= dt; return c.life > 0; });
     if (p.poweredTimer > 0) p.poweredTimer -= dt; if (p.lobCharging) p.lobChargeTimer += dt; if (p.slowOrbCharging) p.slowOrbChargeTimer += dt; if (p.smokeCharging) p.smokeChargeTimer += dt;
     clampPlayer(p); if (this.gs.ball.holder === pid) { this.gs.ball.x = p.x + p.lastDirX * (p.r * 0.7); this.gs.ball.y = p.y + p.lastDirY * (p.r * 0.7); }
