@@ -3948,6 +3948,8 @@
         let socket, myPid, myRoomId, allSkills = [], gameStarted = false;
         let myTeam = 'p1', onlineMaxPlayers = 2;
         let onlineTeamSize = 1;
+        let __playerStatic = null;          // game_init ile gelen statik oyuncu verisi (color/abilities tanımı/profile)
+        let __initialTimeLeft = 180;
 
         function setOnlineTeamSize(size) {
             onlineTeamSize = size;
@@ -4067,27 +4069,81 @@
                     gameStarted = true;
                     resizeGame();
                     requestAnimationFrame(gameLoop);
+                } else if (msg.type === 'game_init') {
+                    // Statik veriyi sakla (color/team/profile/abilities tanımı) — her tick'te tekrar gelmiyor
+                    __playerStatic = msg.players || {};
+                    if (typeof msg.timeLeft === 'number') __initialTimeLeft = msg.timeLeft;
                 } else if (msg.type === 'state') {
-                    gs = msg.gs;
-                    if (!gs.walls) gs.walls = [];
-                    Object.keys(gs.players || {}).forEach(pid => {
+                    // Sunucudan zayıf state geldi; eksik alanları statik veriyle doldur
+                    const slim = msg.gs;
+                    const players = {};
+                    Object.keys(slim.players || {}).forEach(pid => {
+                        const sp = slim.players[pid];
+                        const stat = (__playerStatic && __playerStatic[pid]) || {};
                         const keyCodes = pid === 'p1' ? ['KeyQ', 'KeyE', 'KeyR', 'KeyT'] : ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
-                        if (gs.players[pid] && gs.players[pid].abilities) {
-                            gs.players[pid].abilities.forEach((ab, i) => {
-                                const fullSk = allSkills.find(s => s.id === ab.id);
-                                if (fullSk) {
-                                    ab.icon = fullSk.icon;
-                                    ab.key = keyCodes[i] || '';
-                                }
-                            });
-                        }
+                        // Yetenekleri statik tanım + dinamik c/a ile birleştir
+                        const abFull = (sp.abilities || []).map((ab, i) => {
+                            const statAb = (stat.abilities && stat.abilities[i]) || {};
+                            return {
+                                id: statAb.id,
+                                icon: statAb.icon,
+                                cd: statAb.cd,
+                                color: statAb.color,
+                                name: statAb.name,
+                                key: keyCodes[i] || '',
+                                cdLeft: ab.c || 0,
+                                active: !!ab.a,
+                            };
+                        });
+                        players[pid] = Object.assign({}, sp, {
+                            color: stat.color || '#fff',
+                            team: stat.team || pid,
+                            r: stat.r || 18,
+                            profile: stat.profile || null,
+                            abilities: abFull,
+                            // Eksik dinamik alanlar varsayılan değerlerle
+                            frozenTimer: sp.frozenTimer || 0,
+                            poweredTimer: sp.poweredTimer || 0,
+                            slideTimer: sp.slideTimer || 0,
+                            slideVx: sp.slideVx || 0,
+                            slideVy: sp.slideVy || 0,
+                            clones: sp.clones || [],
+                            controlsReversedTimer: sp.controlsReversedTimer || 0,
+                            growTimer: sp.growTimer || 0,
+                            shrinkTimer: sp.shrinkTimer || 0,
+                            pullingTimer: sp.pullingTimer || 0,
+                            pulledBy: sp.pulledBy || null,
+                            speedBoostTimer: sp.speedBoostTimer || 0,
+                            geopasActive: !!sp.geopasActive,
+                            geopasTimer: sp.geopasTimer || 0,
+                            shotActiveTimer: sp.shotActiveTimer || 0,
+                            passCharging: !!sp.passCharging,
+                            passChargeMs: sp.passChargeMs || 0,
+                            longPassCharging: !!sp.longPassCharging,
+                            longPassChargeMs: sp.longPassChargeMs || 0,
+                            lobCharging: !!sp.lobCharging,
+                            lobChargeTimer: sp.lobChargeTimer || 0,
+                            slowOrbCharging: !!sp.slowOrbCharging,
+                            slowOrbChargeTimer: sp.slowOrbChargeTimer || 0,
+                            smokeCharging: !!sp.smokeCharging,
+                            smokeChargeTimer: sp.smokeChargeTimer || 0,
+                            wallPreview: sp.wallPreview ? { active: !!sp.wallPreview.active, pos: sp.wallPreview.pos || 0 } : null,
+                        });
+                    });
+                    gs = Object.assign({}, slim, {
+                        players,
+                        walls: slim.walls || [],
+                        slowZones: slim.slowZones || [],
+                        smokeZones: slim.smokeZones || [],
+                        slowOrbProjectiles: slim.slowOrbProjectiles || [],
+                        smokeProjectiles: slim.smokeProjectiles || [],
+                        tackleCooldown: slim.tackleCooldown || 0,
+                        blindTimer: slim.blindTimer || 0,
+                        invisBallTimer: slim.invisBallTimer || 0,
                     });
                     if (!document.getElementById('p1-ab-0')) buildHUD();
                     updateHUD(16);
-                    if (msg.flashes) {
-                        emitGameEvent('server_flashes', { count: msg.flashes.length });
-                        msg.flashes.forEach(f => showFlash(f.msg, f.color));
-                    }
+                    if (msg.flashes) msg.flashes.forEach(f => showFlash(f.msg, f.color));
                 } else if (msg.type === 'gameover') {
                     document.getElementById('overlay').classList.remove('hidden');
                     const w = msg.winner;

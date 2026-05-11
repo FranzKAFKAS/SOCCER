@@ -54,8 +54,10 @@ const TACKLE_RANGE = 52;
 const POWER_STUN_MS = 1000;
 const SHOT_STUN_MS = 700;
 
-const TICK_RATE = 60;
+const TICK_RATE = 60;          // Fizik simülasyonu 60Hz (akıcı)
 const TICK_MS = 1000 / TICK_RATE;
+const BROADCAST_RATE = 30;     // Network 30Hz — bant genişliği yarıya iner, lag azalır
+const BROADCAST_INTERVAL_MS = 1000 / BROADCAST_RATE;
 const WIN_SCORE = 5;
 const GAME_DURATION = 180;
 
@@ -1514,7 +1516,6 @@ class Room {
     this.checkGoal();
     this.updateEffects(dt);
 
-    // Timer
     this.timerTick += dt;
     if (this.timerTick >= 1000) {
       this.timerTick -= 1000;
@@ -1526,60 +1527,108 @@ class Room {
       }
     }
 
-    // Broadcast
-    const flashes = [...this.flashes];
+    // Broadcast'i ayrı throttle et — 30Hz network, 60Hz simülasyon
+    this._broadcastAcc += dt;
+    if (this._broadcastAcc >= BROADCAST_INTERVAL_MS) {
+      this._broadcastAcc = 0;
+      this.broadcastState();
+    }
+  }
+
+  broadcastState() {
+    const flashes = this.flashes;
     this.flashes = [];
     const playersPayload = {};
     Object.keys(this.gs.players).forEach(pid => {
       playersPayload[pid] = this.serializePlayer(this.gs.players[pid]);
     });
-    this.broadcast({
-      type: 'state',
-      gs: {
-        score: this.gs.score,
-        timeLeft: this.timeLeft,
-        tackleCooldown: this.gs.tackleCooldown,
-        freezeProjectile: this.gs.freezeProjectile,
-        hookProjectile: this.gs.hookProjectile,
-        slowOrbProjectiles: this.gs.slowOrbProjectiles,
-        slowZones: this.gs.slowZones,
-        smokeProjectiles: this.gs.smokeProjectiles,
-        smokeZones: this.gs.smokeZones,
-        walls: this.gs.walls || [],
-        penaltyMode: this.gs.penaltyMode,
-        blindTimer: this.gs.blindTimer,
-        blindOwner: this.gs.blindOwner,
-        invisBallTimer: this.gs.invisBallTimer,
-        ball: this.gs.ball,
-        players: playersPayload,
+    const ball = this.gs.ball;
+    // Sayı yuvarlama: r1 = 1 ondalık (pos), r0 = tam sayı (timer)
+    const r1 = (n) => Math.round(n * 10) / 10;
+    const slim = {
+      score: this.gs.score,
+      timeLeft: this.timeLeft,
+      ball: {
+        x: r1(ball.x), y: r1(ball.y),
+        vx: r1(ball.vx), vy: r1(ball.vy),
+        holder: ball.holder,
+        inAir: ball.inAir || undefined,
+        lobMode: ball.lobMode || undefined,
+        lobProgress: ball.lobMode ? r1(ball.lobProgress) : undefined,
+        lobFrom: ball.lobMode ? ball.lobFrom : undefined,
+        lobTo: ball.lobMode ? ball.lobTo : undefined,
+        longPassMode: ball.longPassMode || undefined,
+        longPassOwner: ball.longPassOwner || undefined,
+        shotMode: ball.shotMode || undefined,
+        shotOwner: ball.shotOwner || undefined,
+        teknikPassMode: ball.teknikPassMode || undefined,
       },
-      flashes,
-    });
+      players: playersPayload,
+    };
+    // Boş array/0 değerleri sadece dolu ise gönder
+    if (this.gs.tackleCooldown > 0) slim.tackleCooldown = Math.round(this.gs.tackleCooldown);
+    if (this.gs.freezeProjectile) slim.freezeProjectile = this.gs.freezeProjectile;
+    if (this.gs.hookProjectile) slim.hookProjectile = this.gs.hookProjectile;
+    if (this.gs.slowOrbProjectiles.length) slim.slowOrbProjectiles = this.gs.slowOrbProjectiles;
+    if (this.gs.slowZones.length) slim.slowZones = this.gs.slowZones;
+    if (this.gs.smokeProjectiles.length) slim.smokeProjectiles = this.gs.smokeProjectiles;
+    if (this.gs.smokeZones.length) slim.smokeZones = this.gs.smokeZones;
+    if (this.gs.walls && this.gs.walls.length) slim.walls = this.gs.walls;
+    if (this.gs.penaltyMode) slim.penaltyMode = this.gs.penaltyMode;
+    if (this.gs.blindTimer > 0) { slim.blindTimer = Math.round(this.gs.blindTimer); slim.blindOwner = this.gs.blindOwner; }
+    if (this.gs.invisBallTimer > 0) slim.invisBallTimer = Math.round(this.gs.invisBallTimer);
+    const payload = { type: 'state', gs: slim };
+    if (flashes.length) payload.flashes = flashes;
+    this.broadcast(payload);
   }
 
   serializePlayer(p) {
-    return {
-      x: p.x, y: p.y, r: p.r,
-      color: p.color, team: p.team, facing: p.facing,
-      lastDirX: p.lastDirX, lastDirY: p.lastDirY,
-      frozenTimer: p.frozenTimer, poweredTimer: p.poweredTimer,
-      slideTimer: p.slideTimer, slideVx: p.slideVx, slideVy: p.slideVy,
-      clones: p.clones,
-      controlsReversedTimer: p.controlsReversedTimer,
-      growTimer: p.growTimer, shrinkTimer: p.shrinkTimer,
-      pullingTimer: p.pullingTimer, pulledBy: p.pulledBy,
-      lobCharging: p.lobCharging, lobChargeTimer: p.lobChargeTimer,
-      slowOrbCharging: p.slowOrbCharging, slowOrbChargeTimer: p.slowOrbChargeTimer,
-      smokeCharging: p.smokeCharging, smokeChargeTimer: p.smokeChargeTimer,
-      speedBoostTimer: p.speedBoostTimer,
-      geopasActive: p.geopasActive, geopasTimer: p.geopasTimer,
-      shotActiveTimer: p.shotActiveTimer,
-      passCharging: p.passCharging, passChargeMs: p.passChargeMs,
-      longPassCharging: p.longPassCharging, longPassChargeMs: p.longPassChargeMs,
-      profile: p.profile || null,
-      wallPreview: p.wallPreview,
-      abilities: p.abilities.map(a => ({ id: a.id, cdLeft: a.cdLeft, active: a.active, cd: a.cd, key: a.key })),
+    // Sadece dinamik alanlar gidiyor — color/team/r/profile/abilities tanımı `game_init`'te bir kez yollandı
+    const r1 = (n) => Math.round(n * 10) / 10;
+    const out = {
+      x: r1(p.x), y: r1(p.y),
+      lastDirX: r1(p.lastDirX), lastDirY: r1(p.lastDirY),
+      abilities: p.abilities.map(a => {
+        const ab = {};
+        if (a.cdLeft > 0) ab.c = Math.round(a.cdLeft);
+        if (a.active) ab.a = 1;
+        return ab;
+      }),
     };
+    if (p.frozenTimer > 0) out.frozenTimer = Math.round(p.frozenTimer);
+    if (p.poweredTimer > 0) out.poweredTimer = Math.round(p.poweredTimer);
+    if (p.slideTimer > 0) { out.slideTimer = Math.round(p.slideTimer); out.slideVx = r1(p.slideVx); out.slideVy = r1(p.slideVy); }
+    if (p.clones && p.clones.length) out.clones = p.clones.map(c => ({ x: r1(c.x), y: r1(c.y), life: Math.round(c.life) }));
+    if (p.controlsReversedTimer > 0) out.controlsReversedTimer = Math.round(p.controlsReversedTimer);
+    if (p.growTimer > 0) out.growTimer = Math.round(p.growTimer);
+    if (p.shrinkTimer > 0) out.shrinkTimer = Math.round(p.shrinkTimer);
+    if (p.pullingTimer > 0) { out.pullingTimer = Math.round(p.pullingTimer); out.pulledBy = p.pulledBy; }
+    if (p.lobCharging) { out.lobCharging = 1; out.lobChargeTimer = Math.round(p.lobChargeTimer); }
+    if (p.slowOrbCharging) { out.slowOrbCharging = 1; out.slowOrbChargeTimer = Math.round(p.slowOrbChargeTimer); }
+    if (p.smokeCharging) { out.smokeCharging = 1; out.smokeChargeTimer = Math.round(p.smokeChargeTimer); }
+    if (p.speedBoostTimer > 0) out.speedBoostTimer = Math.round(p.speedBoostTimer);
+    if (p.geopasActive) { out.geopasActive = 1; out.geopasTimer = Math.round(p.geopasTimer); }
+    if (p.shotActiveTimer > 0) out.shotActiveTimer = Math.round(p.shotActiveTimer);
+    if (p.passCharging) { out.passCharging = 1; out.passChargeMs = Math.round(p.passChargeMs); }
+    if (p.longPassCharging) { out.longPassCharging = 1; out.longPassChargeMs = Math.round(p.longPassChargeMs); }
+    if (p.wallPreview && p.wallPreview.active) out.wallPreview = { active: 1, pos: p.wallPreview.pos };
+    return out;
+  }
+
+  // Statik (oyun boyu değişmeyen) oyuncu verisi — sadece bir kez yollanır
+  buildGameInit() {
+    const players = {};
+    Object.keys(this.gs.players).forEach(pid => {
+      const p = this.gs.players[pid];
+      players[pid] = {
+        color: p.color,
+        team: p.team,
+        r: p.r,
+        profile: p.profile,
+        abilities: p.abilities.map(a => ({ id: a.id, cd: a.cd, icon: a.icon, color: a.color, name: a.name })),
+      };
+    });
+    return { type: 'game_init', players, timeLeft: this.timeLeft };
   }
 
   // ─────────────── START ───────────────
@@ -1590,8 +1639,11 @@ class Room {
     this.gameOver = false;
     this.timeLeft = GAME_DURATION;
     this.timerTick = 0;
+    this._broadcastAcc = 0;
     this.lastTick = Date.now();
     this.broadcast({ type: 'start' });
+    // Statik veri (color/team/profile/abilities) tek seferde gönderilir; state mesajları yalın olur
+    this.broadcast(this.buildGameInit());
     this.ticker = setInterval(() => {
       const now = Date.now();
       const dt = Math.min(now - this.lastTick, 50);
