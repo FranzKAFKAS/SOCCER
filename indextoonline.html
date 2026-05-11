@@ -3950,6 +3950,13 @@
         let onlineTeamSize = 1;
         let __playerStatic = null;          // game_init ile gelen statik oyuncu verisi (color/abilities tanımı/profile)
         let __initialTimeLeft = 180;
+        // Client-side prediction: kendi karakterin için lokal pozisyon — input lag'i öldürür
+        let __pred = { x: null, y: null, lastDirX: 1, lastDirY: 0, lastInputAt: 0 };
+        const __PRED_SPEED = 3.2; // PLAYER_SPEED ile aynı
+        // Interpolation: rakip + top için son 2 sunucu snapshot'ı arasında lerp
+        // Sunucu 60Hz state yolluyor; ufak tampon paket gecikmelerini absorbe eder
+        const __INTERP_DELAY_MS = 50;  // 3 frame önce render — action feedback hızlı
+        let __snapshots = []; // [{t, players: {pid: {x,y,lastDirX,lastDirY}}, ball: {x,y,holder}}]
 
         function setOnlineTeamSize(size) {
             onlineTeamSize = size;
@@ -4141,6 +4148,22 @@
                         blindTimer: slim.blindTimer || 0,
                         invisBallTimer: slim.invisBallTimer || 0,
                     });
+                    // Interpolation için snapshot kaydet (sadece rakip + top pozisyonu)
+                    const snap = {
+                        t: performance.now(),
+                        players: {},
+                        ball: { x: gs.ball.x, y: gs.ball.y, holder: gs.ball.holder },
+                    };
+                    Object.keys(gs.players).forEach(pid => {
+                        snap.players[pid] = {
+                            x: gs.players[pid].x,
+                            y: gs.players[pid].y,
+                            lastDirX: gs.players[pid].lastDirX,
+                            lastDirY: gs.players[pid].lastDirY,
+                        };
+                    });
+                    __snapshots.push(snap);
+                    if (__snapshots.length > 6) __snapshots.shift();
                     if (!document.getElementById('p1-ab-0')) buildHUD();
                     updateHUD(16);
                     if (msg.flashes) msg.flashes.forEach(f => showFlash(f.msg, f.color));
@@ -4202,9 +4225,144 @@
             socket.send(JSON.stringify({ type: 'input', dx, dy, penaltyBarBoost, wallHeld }));
         }
 
-        // Override local gameLoop
+        let __lastFrameAt = 0;
+        // Override local gameLoop with prediction
         gameLoop = function (timestamp) {
+            const now = performance.now();
+            const dt = __lastFrameAt ? (now - __lastFrameAt) : 16;
+            __lastFrameAt = now;
             if (gameStarted && gs && gs.ball && gs.players) {
+                // ─── INTERPOLATION: rakip + top için pürüzsüz hareket ───
+                // Tek snapshot varsa onu render et (predict sonrası buffer temizlendi)
+                if (__snapshots.length === 1) {
+                    const s = __snapshots[0];
+                    Object.keys(gs.players).forEach(pid => {
+                        if (pid === myPid) return;
+                        const sp = s.players[pid];
+                        if (sp) {
+                            gs.players[pid].x = sp.x;
+                            gs.players[pid].y = sp.y;
+                            gs.players[pid].lastDirX = sp.lastDirX;
+                            gs.players[pid].lastDirY = sp.lastDirY;
+                        }
+                    });
+                    if (gs.ball.holder !== myPid) {
+                        gs.ball.x = s.ball.x;
+                        gs.ball.y = s.ball.y;
+                    }
+                } else if (__snapshots.length >= 2) {
+                    const renderTime = now - __INTERP_DELAY_MS;
+                    let s0 = __snapshots[0], s1 = __snapshots[1];
+                    for (let i = 0; i < __snapshots.length - 1; i++) {
+                        if (__snapshots[i].t <= renderTime && __snapshots[i + 1].t >= renderTime) {
+                            s0 = __snapshots[i]; s1 = __snapshots[i + 1]; break;
+                        }
+                    }
+                    // Eğer renderTime son snapshot'tan sonraysa son ikiyi kullan (kısa extrapolation)
+                    if (renderTime > __snapshots[__snapshots.length - 1].t) {
+                        s0 = __snapshots[__snapshots.length - 2];
+                        s1 = __snapshots[__snapshots.length - 1];
+                    }
+                    const span = s1.t - s0.t;
+                    const frac = span > 0 ? Math.max(0, Math.min(1.2, (renderTime - s0.t) / span)) : 1;
+                    // Rakip oyuncuyu lerp ile yumuşat (kendi karaktere dokunma — prediction var)
+                    Object.keys(gs.players).forEach(pid => {
+                        if (pid === myPid) return;
+                        const a = s0.players[pid], b = s1.players[pid];
+                        if (a && b) {
+                            gs.players[pid].x = a.x + (b.x - a.x) * frac;
+                            gs.players[pid].y = a.y + (b.y - a.y) * frac;
+                            gs.players[pid].lastDirX = a.lastDirX + (b.lastDirX - a.lastDirX) * frac;
+                            gs.players[pid].lastDirY = a.lastDirY + (b.lastDirY - a.lastDirY) * frac;
+                        }
+                    });
+                    // Topu da lerp et (kendi topundaysa prediction sonrası bizimle gelir, override etme)
+                    if (gs.ball.holder !== myPid) {
+                        gs.ball.x = s0.ball.x + (s1.ball.x - s0.ball.x) * frac;
+                        gs.ball.y = s0.ball.y + (s1.ball.y - s0.ball.y) * frac;
+                    }
+                }
+
+                // CLIENT-SIDE PREDICTION: kendi karakter için input'a göre lokal hareket et
+                const me = gs.players[myPid];
+                if (me) {
+                    if (__pred.x === null) { __pred.x = me.x; __pred.y = me.y; }
+                    // Server pozisyonuna yumuşak lerp (sapma düzeltmesi)
+                    const reconcile = 0.18;
+                    __pred.x += (me.x - __pred.x) * reconcile;
+                    __pred.y += (me.y - __pred.y) * reconcile;
+
+                    // Slide aktifse pred pos'u slide velocity ile ilerlet
+                    if (me.slideTimer > 0) {
+                        const scale = dt / (1000 / 60);
+                        __pred.x += (me.slideVx || 0) * scale;
+                        __pred.y += (me.slideVy || 0) * scale;
+                        me.slideVx = (me.slideVx || 0) * 0.9;
+                        me.slideVy = (me.slideVy || 0) * 0.9;
+                        me.slideTimer -= dt;
+                        if (me.slideTimer <= 0) { me.slideTimer = 0; me.slideVx = 0; me.slideVy = 0; }
+                    }
+
+                    // Teknik pas şarjı sayacı
+                    if (me.passCharging && gs.ball.holder === myPid && me.profile && me.profile.id === 'teknik') {
+                        me.passChargeMs = Math.min(900, (me.passChargeMs || 0) + dt);
+                    } else if (me.passCharging && gs.ball.holder !== myPid) {
+                        me.passCharging = false; me.passChargeMs = 0;
+                    }
+
+                    // Yerel input ile öne taşı (sadece donmuş/penaltı/slide değilse)
+                    const blocked = (me.frozenTimer > 0) || (me.slideTimer > 0) ||
+                        (gs.penaltyMode && (gs.penaltyMode.active || gs.penaltyMode.pending));
+                    if (!blocked) {
+                        let dx = 0, dy = 0;
+                        if (keys['KeyW'] || keys['ArrowUp']) dy -= 1;
+                        if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
+                        if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
+                        if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
+                        if (navigator.getGamepads) {
+                            const gpIdx = myPid === 'p1' ? 0 : 1;
+                            const gp = navigator.getGamepads()[gpIdx];
+                            if (gp && gp.connected) {
+                                if (Math.abs(gp.axes[0]) > 0.2) dx += gp.axes[0];
+                                if (Math.abs(gp.axes[1]) > 0.2) dy += gp.axes[1];
+                                if (gp.buttons[12] && gp.buttons[12].pressed) dy -= 1;
+                                if (gp.buttons[13] && gp.buttons[13].pressed) dy += 1;
+                                if (gp.buttons[14] && gp.buttons[14].pressed) dx -= 1;
+                                if (gp.buttons[15] && gp.buttons[15].pressed) dx += 1;
+                            }
+                        }
+                        if (dx || dy) {
+                            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                            const isOfansif = me.profile && me.profile.id === 'ofansif';
+                            const boost = (me.speedBoostTimer > 0) ? 1.9 : 1.0;
+                            const profileMod = isOfansif ? 1.1 : 1.0;
+                            const ballHold = (gs.ball && gs.ball.holder === myPid && !isOfansif) ? 0.8 : 1;
+                            const powered = (me.poweredTimer > 0) ? 1.4 : 1.0;
+                            const speed = __PRED_SPEED * boost * profileMod * ballHold * powered;
+                            const step = speed * (dt / (1000 / 60));
+                            __pred.x += (dx / len) * step;
+                            __pred.y += (dy / len) * step;
+                            __pred.lastDirX = dx / len;
+                            __pred.lastDirY = dy / len;
+                        }
+                        // Saha sınırları
+                        __pred.x = Math.max(FIELD_LEFT + me.r, Math.min(FIELD_RIGHT - me.r, __pred.x));
+                        __pred.y = Math.max(FIELD_TOP + me.r, Math.min(FIELD_BOTTOM - me.r, __pred.y));
+                    }
+                    // Predicted pozisyonu render için player objesine yansıt
+                    me.x = __pred.x;
+                    me.y = __pred.y;
+                    if (__pred.lastDirX || __pred.lastDirY) {
+                        me.lastDirX = __pred.lastDirX;
+                        me.lastDirY = __pred.lastDirY;
+                    }
+                    // Top sahibimizse top da bizimle gelsin (sunucu zaten yapacak ama gecikmesin)
+                    if (gs.ball && gs.ball.holder === myPid) {
+                        gs.ball.x = me.x + (me.lastDirX || 0) * (me.r * 0.7);
+                        gs.ball.y = me.y + (me.lastDirY || 0) * (me.r * 0.7);
+                    }
+                }
+
                 drawField();
                 drawSlowZones();
                 drawFreezeProjectile();
@@ -4228,21 +4386,160 @@
         const ABILITY_KEYS_P1 = ['KeyQ', 'KeyE', 'KeyR', 'KeyT'];
         const ABILITY_KEYS_P2 = ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
 
+        // Action mesajlarına anlık predicted pozisyon + yön ekle — pas/skill/tackle gecikmesiz tetiklenir
+        function sendAction(extra) {
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            const me = gs && gs.players && gs.players[myPid];
+            const payload = { type: 'action', ...extra };
+            if (me) {
+                payload.x = Math.round(me.x * 10) / 10;
+                payload.y = Math.round(me.y * 10) / 10;
+                payload.dirX = Math.round(me.lastDirX * 100) / 100;
+                payload.dirY = Math.round(me.lastDirY * 100) / 100;
+            }
+            socket.send(JSON.stringify(payload));
+            predictAction(extra);
+        }
+
+        // CLIENT-SIDE ACTION PREDICTION: pas/tackle/skill tetiklendiğinde anında lokal etki
+        // Sunucu sonraki state'te aynı sonucu yollar; uyuşmazlık olursa interpolation düzeltir.
+        function predictAction(extra) {
+            if (!gs || !gs.players) return;
+            const me = gs.players[myPid];
+            if (!me || me.frozenTimer > 0) return;
+            const oppPid = myPid === 'p1' ? 'p2' : 'p1';
+            const opp = gs.players[oppPid];
+            const b = gs.ball;
+            if (!b) return;
+
+            // Son snapshot'ı güncelle yardımcısı (top pozisyonu lokal değişince interp eski pozisyona dönmesin)
+            const syncBallSnapshot = () => {
+                if (__snapshots.length) {
+                    const last = __snapshots[__snapshots.length - 1];
+                    last.ball = { x: b.x, y: b.y, holder: b.holder };
+                }
+            };
+
+            if (extra.action === 'pass_press') {
+                if (gs.penaltyMode && gs.penaltyMode.active) return;
+                const isTeknik = me.profile && me.profile.id === 'teknik';
+                // Teknik: pas şarjı başlat (visualization için passCharging set et)
+                if (b.holder === myPid && isTeknik) {
+                    me.passCharging = true;
+                    me.passChargeMs = 0;
+                    return;
+                }
+                // Non-teknik: anında fırlat
+                if (b.holder === myPid && !isTeknik) {
+                    const PASS_SPEED = 15, BALL_R = 10;
+                    const dir = Math.hypot(me.lastDirX, me.lastDirY) || 1;
+                    const dx = me.lastDirX / dir, dy = me.lastDirY / dir;
+                    b.holder = null;
+                    b.inAir = true;
+                    b.vx = dx * PASS_SPEED * 0.72;
+                    b.vy = dy * PASS_SPEED * 0.72;
+                    b.x = me.x + dx * (me.r + BALL_R + 2);
+                    b.y = me.y + dy * (me.r + BALL_R + 2);
+                    syncBallSnapshot();
+                }
+            } else if (extra.action === 'pass_release') {
+                // Teknik şarjlı pas serbest bırakıldığında lokal fırlat
+                const isTeknik = me.profile && me.profile.id === 'teknik';
+                if (isTeknik && me.passCharging && b.holder === myPid) {
+                    const PASS_SPEED = 15, BALL_R = 10, MAX_MS = 900;
+                    const t = Math.min(1, (me.passChargeMs || 0) / MAX_MS);
+                    const speedMult = 1 + t * 1.45;
+                    const dir = Math.hypot(me.lastDirX, me.lastDirY) || 1;
+                    const dx = me.lastDirX / dir, dy = me.lastDirY / dir;
+                    b.holder = null;
+                    b.inAir = true;
+                    b.vx = dx * PASS_SPEED * speedMult;
+                    b.vy = dy * PASS_SPEED * speedMult;
+                    b.x = me.x + dx * (me.r + BALL_R + 2);
+                    b.y = me.y + dy * (me.r + BALL_R + 2);
+                    me.passCharging = false;
+                    me.passChargeMs = 0;
+                    syncBallSnapshot();
+                }
+            } else if (extra.action === 'tackle') {
+                if (gs.penaltyMode || me.slideTimer > 0) return;
+                const distOpp = opp ? Math.hypot(opp.x - me.x, opp.y - me.y) : 9999;
+                const distBall = Math.hypot(b.x - me.x, b.y - me.y);
+                const TACKLE_RANGE = 52, BALL_R = 10;
+                if (distOpp <= TACKLE_RANGE && b.holder === oppPid) {
+                    b.holder = myPid; b.vx = 0; b.vy = 0; b.inAir = false;
+                    b.shotMode = false; b.shotOwner = null;
+                    b.longPassMode = false; b.longPassOwner = null;
+                    b.teknikPassMode = false;
+                    syncBallSnapshot();
+                } else if (b.holder === null && !b.lobMode && distBall <= me.r + BALL_R + 10) {
+                    b.holder = myPid; b.vx = 0; b.vy = 0; b.inAir = false;
+                    b.shotMode = false; b.shotOwner = null;
+                    b.longPassMode = false; b.longPassOwner = null;
+                    b.teknikPassMode = false;
+                    syncBallSnapshot();
+                }
+            } else if (extra.action === 'ability_press' && typeof extra.idx === 'number') {
+                const ab = me.abilities && me.abilities[extra.idx];
+                if (!ab || (ab.cdLeft && ab.cdLeft > 0) || !ab.cd) return;
+
+                // Slide skill — kayma hareketini lokal başlat
+                if (ab.id === 'slide') {
+                    const dir = Math.hypot(me.lastDirX, me.lastDirY) || 1;
+                    me.slideVx = (me.lastDirX / dir) * 14;
+                    me.slideVy = (me.lastDirY / dir) * 14;
+                    me.slideTimer = 400;
+                    ab.cdLeft = ab.cd; ab.active = true;
+                    return;
+                }
+                // Power — anında glow
+                if (ab.id === 'power') {
+                    me.poweredTimer = 2000;
+                    ab.cdLeft = ab.cd; ab.active = true;
+                    return;
+                }
+                // SelfPass — anında ileri lobla
+                if (ab.id === 'selfpass' && b.holder === myPid) {
+                    const angle = 0.35;
+                    const cos = Math.cos(angle), sin = Math.sin(angle);
+                    const kx = me.lastDirX * cos - me.lastDirY * sin;
+                    const ky = me.lastDirX * sin + me.lastDirY * cos;
+                    b.holder = null; b.inAir = true;
+                    b.vx = kx * 9.5; b.vy = ky * 9.5;
+                    me.poweredTimer = Math.max(me.poweredTimer || 0, 1200);
+                    ab.cdLeft = ab.cd; ab.active = true;
+                    syncBallSnapshot();
+                    return;
+                }
+                // Speedboost — anında boost
+                if (ab.id === 'speedboost') {
+                    me.speedBoostTimer = ab.duration || 1000;
+                    ab.cdLeft = ab.cd; ab.active = true;
+                    return;
+                }
+                // Diğer instant skill'ler için sadece HUD cooldown
+                const instantHud = ['freeze', 'reverse', 'hook', 'invisball', 'blind', 'shot', 'clone', 'geopas'];
+                if (instantHud.includes(ab.id)) {
+                    ab.cdLeft = ab.cd; ab.active = true;
+                }
+            }
+        }
+
         window.addEventListener('keydown', e => {
             if (!gameStarted) return;
             if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-            if (e.repeat) return; // sadece ilk basışta tetikle (release ile eşleşsin)
+            if (e.repeat) return;
             const list = myPid === 'p1' ? ABILITY_KEYS_P1 : ABILITY_KEYS_P2;
             const idx = list.indexOf(e.code);
             if (idx >= 0) {
-                socket.send(JSON.stringify({ type: 'action', action: 'ability_press', idx }));
+                sendAction({ action: 'ability_press', idx });
                 return;
             }
             if ((myPid === 'p1' && e.code === 'Space') || (myPid === 'p2' && (e.code === 'Space' || e.code === 'Enter'))) {
-                socket.send(JSON.stringify({ type: 'action', action: 'pass_press' }));
+                sendAction({ action: 'pass_press' });
             }
             if ((myPid === 'p1' && e.code === 'KeyF') || (myPid === 'p2' && e.code === 'KeyL')) {
-                socket.send(JSON.stringify({ type: 'action', action: 'tackle' }));
+                sendAction({ action: 'tackle' });
             }
         });
 
@@ -4251,11 +4548,11 @@
             const list = myPid === 'p1' ? ABILITY_KEYS_P1 : ABILITY_KEYS_P2;
             const idx = list.indexOf(e.code);
             if (idx >= 0) {
-                socket.send(JSON.stringify({ type: 'action', action: 'ability_release', idx }));
+                sendAction({ action: 'ability_release', idx });
                 return;
             }
             if ((myPid === 'p1' && e.code === 'Space') || (myPid === 'p2' && (e.code === 'Space' || e.code === 'Enter'))) {
-                socket.send(JSON.stringify({ type: 'action', action: 'pass_release' }));
+                sendAction({ action: 'pass_release' });
             }
         });
 
@@ -4269,22 +4566,19 @@
             const gp = gps && gps[gpIdx];
             if (!gp || !gp.connected) return;
             const prev = __gpPrev[myPid];
-            // Yetenek butonları
             for (let i = 0; i < ABILITY_GAMEPAD_BUTTONS.length; i++) {
                 const btn = gp.buttons[ABILITY_GAMEPAD_BUTTONS[i]];
                 const now = !!(btn && btn.pressed);
-                if (now && !prev.a[i]) socket.send(JSON.stringify({ type: 'action', action: 'ability_press', idx: i }));
-                if (!now && prev.a[i]) socket.send(JSON.stringify({ type: 'action', action: 'ability_release', idx: i }));
+                if (now && !prev.a[i]) sendAction({ action: 'ability_press', idx: i });
+                if (!now && prev.a[i]) sendAction({ action: 'ability_release', idx: i });
                 prev.a[i] = now;
             }
-            // Pas / şut: A butonu (0)
             const passNow = !!(gp.buttons[0] && gp.buttons[0].pressed);
-            if (passNow && !prev.pass) socket.send(JSON.stringify({ type: 'action', action: 'pass_press' }));
-            if (!passNow && prev.pass) socket.send(JSON.stringify({ type: 'action', action: 'pass_release' }));
+            if (passNow && !prev.pass) sendAction({ action: 'pass_press' });
+            if (!passNow && prev.pass) sendAction({ action: 'pass_release' });
             prev.pass = passNow;
-            // Çalma: X butonu (2)
             const tackleNow = !!(gp.buttons[2] && gp.buttons[2].pressed);
-            if (tackleNow && !prev.tackle) socket.send(JSON.stringify({ type: 'action', action: 'tackle' }));
+            if (tackleNow && !prev.tackle) sendAction({ action: 'tackle' });
             prev.tackle = tackleNow;
         }
         setInterval(pollOnlineGamepad, 50);
@@ -4338,6 +4632,8 @@
                     }
                 }
             }
+            // Buffer doluysa input drop et — backpressure ile lag birikmesin
+            if (socket.bufferedAmount > 2048) return;
             socket.send(JSON.stringify({ type: 'input', dx, dy, penaltyBarBoost, wallHeld }));
         };
 

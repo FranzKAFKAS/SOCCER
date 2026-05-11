@@ -54,9 +54,9 @@ const TACKLE_RANGE = 52;
 const POWER_STUN_MS = 1000;
 const SHOT_STUN_MS = 700;
 
-const TICK_RATE = 60;          // Fizik simülasyonu 60Hz (akıcı)
+const TICK_RATE = 60;          // Fizik simülasyonu 60Hz
 const TICK_MS = 1000 / TICK_RATE;
-const BROADCAST_RATE = 30;     // Network 30Hz — bant genişliği yarıya iner, lag azalır
+const BROADCAST_RATE = 60;     // Action feedback için her tick broadcast (paket küçük olduğu için OK)
 const BROADCAST_INTERVAL_MS = 1000 / BROADCAST_RATE;
 const WIN_SCORE = 5;
 const GAME_DURATION = 180;
@@ -1644,11 +1644,26 @@ class Room {
     this.broadcast({ type: 'start' });
     // Statik veri (color/team/profile/abilities) tek seferde gönderilir; state mesajları yalın olur
     this.broadcast(this.buildGameInit());
+    this._perfSamples = [];
+    this._perfReportAt = Date.now() + 5000;
     this.ticker = setInterval(() => {
       const now = Date.now();
       const dt = Math.min(now - this.lastTick, 50);
       this.lastTick = now;
+      const t0 = process.hrtime.bigint();
       this.tick(dt);
+      const tickMs = Number(process.hrtime.bigint() - t0) / 1e6;
+      this._perfSamples.push(tickMs);
+      if (now > this._perfReportAt) {
+        const arr = this._perfSamples;
+        const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+        const max = Math.max(...arr);
+        const bufP1 = (this.players.p1 && this.players.p1.bufferedAmount) || 0;
+        const bufP2 = (this.players.p2 && this.players.p2.bufferedAmount) || 0;
+        console.log(`[perf] tick avg=${avg.toFixed(2)}ms max=${max.toFixed(1)}ms samples=${arr.length} | ws buffered p1=${bufP1}B p2=${bufP2}B`);
+        this._perfSamples = [];
+        this._perfReportAt = now + 5000;
+      }
     }, TICK_MS);
   }
 }
@@ -1713,9 +1728,35 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'action') {
       const room = rooms.get(ws.roomId);
       if (!room || !room.started) return;
+      // Client predicted pozisyon/yön ile state'i action öncesi senkronize et
+      // (pas yönü, skill yönü ve tackle menzili için kritik)
+      const p = room.gs.players[ws.pid];
+      if (p) {
+        if (typeof msg.dirX === 'number' && typeof msg.dirY === 'number') {
+          const l = Math.sqrt(msg.dirX * msg.dirX + msg.dirY * msg.dirY) || 1;
+          p.lastDirX = msg.dirX / l;
+          p.lastDirY = msg.dirY / l;
+        }
+        if (typeof msg.x === 'number' && typeof msg.y === 'number') {
+          // Anti-cheat sınırı: client pozisyonu sunucu pozisyonundan en fazla 40px sapabilir
+          const dx = msg.x - p.x, dy = msg.y - p.y;
+          if (Math.sqrt(dx * dx + dy * dy) < 60) {
+            p.x = Math.max(FIELD_LEFT + p.r, Math.min(FIELD_RIGHT - p.r, msg.x));
+            p.y = Math.max(FIELD_TOP + p.r, Math.min(FIELD_BOTTOM - p.r, msg.y));
+          }
+        }
+      }
       if (msg.action === 'pass_press') room.spacePress(ws.pid);
       else if (msg.action === 'pass_release') room.spaceRelease(ws.pid);
-      else if (msg.action === 'tackle') room.attemptTackle(ws.pid);
+      else if (msg.action === 'tackle') {
+        if (process.env.DEBUG_TACKLE) {
+          const opp = room.gs.players[ws.pid === 'p1' ? 'p2' : 'p1'];
+          const me = room.gs.players[ws.pid];
+          const dist = me && opp ? Math.hypot(opp.x - me.x, opp.y - me.y).toFixed(1) : 'n/a';
+          console.log(`[tackle] ${ws.pid} distOpp=${dist} ballHolder=${room.gs.ball.holder} cd=${room.gs.tackleCooldown}`);
+        }
+        room.attemptTackle(ws.pid);
+      }
       else if (msg.action === 'throw') room.throwBall(ws.pid);
       else if (msg.action === 'ability_press' && typeof msg.idx === 'number') room.startAbilityByIdx(ws.pid, msg.idx);
       else if (msg.action === 'ability_release' && typeof msg.idx === 'number') room.releaseAbilityByIdx(ws.pid, msg.idx);
