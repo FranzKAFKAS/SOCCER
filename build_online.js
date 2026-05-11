@@ -1,5 +1,9 @@
 const fs = require('fs');
 
+// Uyarı: Bu betik index.html + basit lobi ile indextoonline.html üretir.
+// Depodaki indextoonline.html ana menü ve güncel socket mantığı içerir; bu dosyayı
+// çalıştırmadan önce çıktıyı elle birleştirin veya yedek alın.
+
 const html = fs.readFileSync('index.html', 'utf8');
 
 // 1. Add Lobby UI right after <body>

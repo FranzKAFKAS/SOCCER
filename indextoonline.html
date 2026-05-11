@@ -1155,6 +1155,14 @@
 
             document.getElementById('score-p1').textContent = gs.score[0];
             document.getElementById('score-p2').textContent = gs.score[1];
+            if (typeof gs.timeLeft === 'number') {
+                const td = document.getElementById('timer-display');
+                if (td) {
+                    const m = Math.floor(gs.timeLeft / 60).toString().padStart(2, '0');
+                    const s = (gs.timeLeft % 60).toString().padStart(2, '0');
+                    td.textContent = `${m}:${s}`;
+                }
+            }
         }
 
         // ─────────────── PARTICLE SYSTEM ───────────────
@@ -3967,35 +3975,91 @@
             socket.send(JSON.stringify({ type: 'join_room', roomId: code, teamSize: onlineTeamSize }));
         }
 
+        let __onlineSkillSelectionShown = false;
+        function showOnlineSkillSelection() {
+            if (__onlineSkillSelectionShown) return;
+            __onlineSkillSelectionShown = true;
+            document.getElementById('waiting-room').style.display = 'none';
+            document.getElementById('lobby').style.display = 'none';
+            // skill-selection-overlay game-wrapper'ın içinde — parent'ı görünür yap ki overlay çizilebilsin
+            document.getElementById('game-wrapper').style.display = 'flex';
+            document.getElementById('skill-selection-overlay').classList.remove('hidden');
+            initSkillSelection();
+            // Rakibin tarafını devre dışı bırak — sadece kendi profilini seç
+            const otherPid = myPid === 'p1' ? 'p2' : 'p1';
+            const otherPanel = document.querySelector('.' + otherPid + '-selection');
+            if (otherPanel) {
+                otherPanel.style.pointerEvents = 'none';
+                otherPanel.style.opacity = '0.55';
+                const h3 = otherPanel.querySelector('h3');
+                if (h3 && !h3.textContent.includes('RAKİP')) h3.textContent += ' (RAKİP SEÇİYOR)';
+            }
+            const btn = document.getElementById('confirm-skills-btn');
+            let __mySkillsSent = false;
+            btn.onclick = () => {
+                if (__mySkillsSent) return;
+                const myProfile = myPid === 'p1' ? p1Profile : p2Profile;
+                const mySkills = myPid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+                if (!myProfile || !mySkills.length) return;
+                socket.send(JSON.stringify({ type: 'select_skills', skills: mySkills, profile: myProfile }));
+                __mySkillsSent = true;
+                btn.textContent = 'RAKİP BEKLENİYOR...';
+                btn.disabled = true;
+                // Kendi tarafını da düzenlemeyi engelle
+                const myPanel = document.querySelector('.' + myPid + '-selection');
+                if (myPanel) myPanel.style.pointerEvents = 'none';
+            };
+            updateSkillSelectionUI = (function (orig) {
+                return function () {
+                    orig();
+                    if (__mySkillsSent) { btn.disabled = true; return; }
+                    const myProfile = myPid === 'p1' ? p1Profile : p2Profile;
+                    const mySkills = myPid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+                    const need = myProfile ? myProfile.slots : 99;
+                    btn.disabled = (!myProfile || mySkills.length < need);
+                };
+            })(updateSkillSelectionUI);
+            updateSkillSelectionUI();
+        }
+
         function initSocket() {
             socket = new WebSocket(WS_URL);
+            socket.onopen = () => {
+                const em = document.getElementById('error-msg');
+                if (em) em.textContent = '';
+                console.log('[WS] bağlandı');
+            };
+            socket.onerror = (e) => {
+                console.error('[WS] hata', e);
+                const em = document.getElementById('error-msg');
+                if (em) em.textContent = 'Sunucuya bağlanılamadı. node server.js çalışıyor mu?';
+            };
+            socket.onclose = () => {
+                console.warn('[WS] kapandı');
+                if (!gameStarted) {
+                    const em = document.getElementById('error-msg');
+                    if (em && !em.textContent) em.textContent = 'Bağlantı koptu. Sayfayı yenileyin.';
+                }
+            };
             socket.onmessage = (e) => {
                 const msg = JSON.parse(e.data);
                 emitGameEvent('socket_message', { msgType: msg.type });
                 if (msg.type === 'room_created') {
                     myPid = msg.pid; myRoomId = msg.roomId; allSkills = msg.allSkills;
-                    onlineMaxPlayers = msg.maxPlayers || (msg.teamSize || 1) * 2;
-                    myTeam = Number((myPid || 'p1').replace('p', '')) <= (msg.teamSize || 1) ? 'p1' : 'p2';
-                    onlineTeamSize = msg.teamSize || 1;
-                    setOnlineTeamSize(onlineTeamSize);
+                    myTeam = myPid;
                     document.getElementById('lobby').style.display = 'none';
                     const wr = document.getElementById('waiting-room');
                     wr.style.display = 'flex';
                     document.getElementById('display-room-code').textContent = myRoomId;
-                    document.getElementById('waiting-status').textContent = `Oyuncular bekleniyor... (${msg.connectedPlayers || 1}/${onlineMaxPlayers})`;
+                    document.getElementById('waiting-status').textContent = 'Rakip bekleniyor... (1/2)';
                 } else if (msg.type === 'room_joined') {
                     myPid = msg.pid; myRoomId = msg.roomId; allSkills = msg.allSkills;
-                    onlineMaxPlayers = msg.maxPlayers || (msg.teamSize || 1) * 2;
-                    myTeam = Number((myPid || 'p1').replace('p', '')) <= (msg.teamSize || 1) ? 'p1' : 'p2';
-                    onlineTeamSize = msg.teamSize || 1;
-                    setOnlineTeamSize(onlineTeamSize);
-                    document.getElementById('lobby').style.display = 'none';
-                    const wr = document.getElementById('waiting-room');
-                    wr.style.display = 'flex';
-                    document.getElementById('display-room-code').textContent = myRoomId;
-                    document.getElementById('waiting-status').textContent = `Oyuncular bekleniyor... (${msg.connectedPlayers || 1}/${onlineMaxPlayers})`;
-                } else if (msg.type === 'player_joined') {
-                    document.getElementById('waiting-status').textContent = `Oyuncular bekleniyor... (${msg.connectedPlayers || 1}/${msg.maxPlayers || onlineMaxPlayers})`;
+                    myTeam = myPid;
+                    // İkinci oyuncu odaya girdiğinde her iki tarafa skill seçimini aç
+                    showOnlineSkillSelection();
+                } else if (msg.type === 'opponent_joined') {
+                    // Birinci oyuncu için skill seçim ekranı
+                    showOnlineSkillSelection();
                 } else if (msg.type === 'start') {
                     document.getElementById('skill-selection-overlay').classList.add('hidden');
                     document.getElementById('waiting-room').style.display = 'none';
@@ -4005,14 +4069,15 @@
                     requestAnimationFrame(gameLoop);
                 } else if (msg.type === 'state') {
                     gs = msg.gs;
+                    if (!gs.walls) gs.walls = [];
                     Object.keys(gs.players || {}).forEach(pid => {
-                        const keys = ['Q', 'E', 'R', 'T'];
+                        const keyCodes = pid === 'p1' ? ['KeyQ', 'KeyE', 'KeyR', 'KeyT'] : ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
                         if (gs.players[pid] && gs.players[pid].abilities) {
                             gs.players[pid].abilities.forEach((ab, i) => {
                                 const fullSk = allSkills.find(s => s.id === ab.id);
                                 if (fullSk) {
                                     ab.icon = fullSk.icon;
-                                    ab.key = keys[i] || '';
+                                    ab.key = keyCodes[i] || '';
                                 }
                             });
                         }
@@ -4025,7 +4090,16 @@
                     }
                 } else if (msg.type === 'gameover') {
                     document.getElementById('overlay').classList.remove('hidden');
-                    document.getElementById('overlay').querySelector('h2').textContent = msg.winnerTeam === myTeam ? 'KAZANDIN!' : (msg.winnerTeam === 'draw' ? 'BERABERE!' : 'KAYBETTİN');
+                    const w = msg.winner;
+                    document.getElementById('overlay').querySelector('h2').textContent = w === myPid ? 'KAZANDIN!' : (w === 'draw' ? 'BERABERE!' : 'KAYBETTİN');
+                    if (msg.score) {
+                        const sub = document.getElementById('overlay').querySelector('.subtitle');
+                        if (sub) sub.textContent = 'Skor: ' + msg.score[0] + ' — ' + msg.score[1];
+                    }
+                } else if (msg.type === 'opponent_left') {
+                    document.getElementById('overlay').classList.remove('hidden');
+                    const h2 = document.getElementById('overlay').querySelector('h2');
+                    if (h2) h2.textContent = 'RAKİP AYRILDI';
                 } else if (msg.type === 'error') {
                     document.getElementById('error-msg').textContent = msg.msg;
                 }
@@ -4040,26 +4114,52 @@
             if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
             if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
             if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
-            socket.send(JSON.stringify({ type: 'input', dx, dy }));
+
+            let penaltyBarBoost = false;
+            const pm = gs.penaltyMode;
+            if (pm && pm.active && !pm.shot && pm.keeper === myPid) {
+                penaltyBarBoost = !!(myPid === 'p1' ? keys['KeyF'] : keys['KeyL']);
+                if (!penaltyBarBoost && navigator.getGamepads) {
+                    const gpIdx = myPid === 'p1' ? 0 : 1;
+                    const gp = navigator.getGamepads()[gpIdx];
+                    if (gp && gp.connected && gp.buttons[2] && gp.buttons[2].pressed) penaltyBarBoost = true;
+                }
+            }
+
+            let wallHeld = false;
+            const me = gs.players && gs.players[myPid];
+            if (me && me.wallPreview && me.wallPreview.active) {
+                const wallAb = me.abilities && me.abilities.find(a => a.id === 'wall');
+                if (wallAb && wallAb.key && keys[wallAb.key]) wallHeld = true;
+                if (!wallHeld && navigator.getGamepads) {
+                    const gpIdx = myPid === 'p1' ? 0 : 1;
+                    const gp = navigator.getGamepads()[gpIdx];
+                    const ABILITY_GAMEPAD_BUTTONS = [4, 5, 3, 1];
+                    if (gp && gp.connected && wallAb) {
+                        const abIdx = me.abilities.indexOf(wallAb);
+                        const btnIdx = ABILITY_GAMEPAD_BUTTONS[abIdx];
+                        if (btnIdx != null && gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed) wallHeld = true;
+                    }
+                }
+            }
+
+            socket.send(JSON.stringify({ type: 'input', dx, dy, penaltyBarBoost, wallHeld }));
         }
 
         // Override local gameLoop
         gameLoop = function (timestamp) {
-            // we don't do physics locally anymore, just draw
-            if (gameStarted && gs) {
+            if (gameStarted && gs && gs.ball && gs.players) {
                 drawField();
                 drawSlowZones();
                 drawFreezeProjectile();
                 drawHook();
                 drawWalls();
-                Object.keys(gs.players || {}).forEach(pid => drawPlayer(pid));
+                Object.keys(gs.players).forEach(pid => drawPlayer(pid));
                 drawBall();
                 drawSmokeZones();
                 updateParticles();
                 drawParticles();
                 drawPenaltyBar();
-
-                // Keep input sending active
                 sendSocketInput();
             }
             requestAnimationFrame(gameLoop);
@@ -4068,32 +4168,122 @@
         // Do NOT auto-init socket - only init when user picks online mode
         // initSocket(); // removed
 
-        // Override local event listeners for actions
+        // Tuş haritaları (yerel oyun ile aynı: P1 = Q/E/R/T + Space + F, P2 = U/I/O/P + Enter/Space + L)
+        const ABILITY_KEYS_P1 = ['KeyQ', 'KeyE', 'KeyR', 'KeyT'];
+        const ABILITY_KEYS_P2 = ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
+
         window.addEventListener('keydown', e => {
             if (!gameStarted) return;
-            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
-                e.preventDefault();
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+            if (e.repeat) return; // sadece ilk basışta tetikle (release ile eşleşsin)
+            const list = myPid === 'p1' ? ABILITY_KEYS_P1 : ABILITY_KEYS_P2;
+            const idx = list.indexOf(e.code);
+            if (idx >= 0) {
+                socket.send(JSON.stringify({ type: 'action', action: 'ability_press', idx }));
+                return;
             }
-            if (e.code === 'KeyQ') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 0 }));
-            if (e.code === 'KeyE') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 1 }));
-            if (e.code === 'KeyR') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 2 }));
-            if (e.code === 'KeyT') socket.send(JSON.stringify({ type: 'action', action: 'ability', idx: 3 }));
-            if (e.code === 'Enter' || e.code === 'Space') socket.send(JSON.stringify({ type: 'action', action: 'pass' }));
-            if (e.code === 'KeyL' || e.code === 'KeyF') socket.send(JSON.stringify({ type: 'action', action: 'throw' }));
-            if (e.code === 'KeyG' || e.code === 'KeyK') socket.send(JSON.stringify({ type: 'action', action: 'foul_boost' }));
+            if ((myPid === 'p1' && e.code === 'Space') || (myPid === 'p2' && (e.code === 'Space' || e.code === 'Enter'))) {
+                socket.send(JSON.stringify({ type: 'action', action: 'pass_press' }));
+            }
+            if ((myPid === 'p1' && e.code === 'KeyF') || (myPid === 'p2' && e.code === 'KeyL')) {
+                socket.send(JSON.stringify({ type: 'action', action: 'tackle' }));
+            }
         });
 
         window.addEventListener('keyup', e => {
             if (!gameStarted) return;
-            let releasedId = null;
-            const myPlayer = gs.players && gs.players[myPid];
-            if (!myPlayer) return;
-            if (e.code === 'KeyQ') releasedId = myPlayer.abilities[0]?.id;
-            if (e.code === 'KeyE') releasedId = myPlayer.abilities[1]?.id;
-            if (e.code === 'KeyR') releasedId = myPlayer.abilities[2]?.id;
-            if (e.code === 'KeyT') releasedId = myPlayer.abilities[3]?.id;
-            if (releasedId) socket.send(JSON.stringify({ type: 'release_ability', id: releasedId }));
+            const list = myPid === 'p1' ? ABILITY_KEYS_P1 : ABILITY_KEYS_P2;
+            const idx = list.indexOf(e.code);
+            if (idx >= 0) {
+                socket.send(JSON.stringify({ type: 'action', action: 'ability_release', idx }));
+                return;
+            }
+            if ((myPid === 'p1' && e.code === 'Space') || (myPid === 'p2' && (e.code === 'Space' || e.code === 'Enter'))) {
+                socket.send(JSON.stringify({ type: 'action', action: 'pass_release' }));
+            }
         });
+
+        // ─────────── GAMEPAD INPUT (yerel oyunla aynı buton düzeni) ───────────
+        const ABILITY_GAMEPAD_BUTTONS = [4, 5, 3, 1]; // LB, RB, Y/Triangle, B/Circle
+        const __gpPrev = { p1: { a: [false, false, false, false], pass: false, tackle: false }, p2: { a: [false, false, false, false], pass: false, tackle: false } };
+        function pollOnlineGamepad() {
+            if (!gameStarted || !navigator.getGamepads) return;
+            const gpIdx = myPid === 'p1' ? 0 : 1;
+            const gps = navigator.getGamepads();
+            const gp = gps && gps[gpIdx];
+            if (!gp || !gp.connected) return;
+            const prev = __gpPrev[myPid];
+            // Yetenek butonları
+            for (let i = 0; i < ABILITY_GAMEPAD_BUTTONS.length; i++) {
+                const btn = gp.buttons[ABILITY_GAMEPAD_BUTTONS[i]];
+                const now = !!(btn && btn.pressed);
+                if (now && !prev.a[i]) socket.send(JSON.stringify({ type: 'action', action: 'ability_press', idx: i }));
+                if (!now && prev.a[i]) socket.send(JSON.stringify({ type: 'action', action: 'ability_release', idx: i }));
+                prev.a[i] = now;
+            }
+            // Pas / şut: A butonu (0)
+            const passNow = !!(gp.buttons[0] && gp.buttons[0].pressed);
+            if (passNow && !prev.pass) socket.send(JSON.stringify({ type: 'action', action: 'pass_press' }));
+            if (!passNow && prev.pass) socket.send(JSON.stringify({ type: 'action', action: 'pass_release' }));
+            prev.pass = passNow;
+            // Çalma: X butonu (2)
+            const tackleNow = !!(gp.buttons[2] && gp.buttons[2].pressed);
+            if (tackleNow && !prev.tackle) socket.send(JSON.stringify({ type: 'action', action: 'tackle' }));
+            prev.tackle = tackleNow;
+        }
+        setInterval(pollOnlineGamepad, 50);
+
+        // Yerel input fonksiyonuna analog/dpad ekle
+        const __origSendInput = sendSocketInput;
+        sendSocketInput = function () {
+            if (!gameStarted) return;
+            let dx = 0, dy = 0;
+            if (keys['KeyW'] || keys['ArrowUp']) dy -= 1;
+            if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
+            if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
+            if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
+            if (navigator.getGamepads) {
+                const gpIdx = myPid === 'p1' ? 0 : 1;
+                const gp = navigator.getGamepads()[gpIdx];
+                if (gp && gp.connected) {
+                    let gpX = 0, gpY = 0, usingAnalog = false;
+                    if (Math.abs(gp.axes[0]) > 0.2) { gpX = gp.axes[0]; usingAnalog = true; }
+                    if (Math.abs(gp.axes[1]) > 0.2) { gpY = gp.axes[1]; usingAnalog = true; }
+                    if (gp.buttons[12] && gp.buttons[12].pressed) { gpY -= 1; usingAnalog = false; }
+                    if (gp.buttons[13] && gp.buttons[13].pressed) { gpY += 1; usingAnalog = false; }
+                    if (gp.buttons[14] && gp.buttons[14].pressed) { gpX -= 1; usingAnalog = false; }
+                    if (gp.buttons[15] && gp.buttons[15].pressed) { gpX += 1; usingAnalog = false; }
+                    if (usingAnalog && dx === 0 && dy === 0) { dx = gpX; dy = gpY; }
+                    else { dx += gpX; dy += gpY; }
+                }
+            }
+            let penaltyBarBoost = false;
+            const pm = gs && gs.penaltyMode;
+            if (pm && pm.active && !pm.shot && pm.keeper === myPid) {
+                penaltyBarBoost = !!(myPid === 'p1' ? keys['KeyF'] : keys['KeyL']);
+                if (!penaltyBarBoost && navigator.getGamepads) {
+                    const gpIdx = myPid === 'p1' ? 0 : 1;
+                    const gp = navigator.getGamepads()[gpIdx];
+                    if (gp && gp.connected && gp.buttons[2] && gp.buttons[2].pressed) penaltyBarBoost = true;
+                }
+            }
+            let wallHeld = false;
+            const me = gs && gs.players && gs.players[myPid];
+            if (me && me.wallPreview && me.wallPreview.active) {
+                const wallAb = me.abilities && me.abilities.find(a => a.id === 'wall');
+                if (wallAb && wallAb.key && keys[wallAb.key]) wallHeld = true;
+                if (!wallHeld && navigator.getGamepads) {
+                    const gpIdx = myPid === 'p1' ? 0 : 1;
+                    const gp = navigator.getGamepads()[gpIdx];
+                    if (gp && gp.connected && wallAb) {
+                        const abIdx = me.abilities.indexOf(wallAb);
+                        const btnIdx = ABILITY_GAMEPAD_BUTTONS[abIdx];
+                        if (btnIdx != null && gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed) wallHeld = true;
+                    }
+                }
+            }
+            socket.send(JSON.stringify({ type: 'input', dx, dy, penaltyBarBoost, wallHeld }));
+        };
 
     </script>
 </body>
