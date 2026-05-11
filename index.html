@@ -1034,6 +1034,12 @@
             const ab = p.abilities[idx];
             if (!ab) return;
 
+            // Penaltı sırasında duvar yeteneği kullanılamaz
+            if (ab.id === 'wall' && gs.penaltyMode) {
+                if (p.wallPreview) p.wallPreview.active = false;
+                return;
+            }
+
             // Wall: ön izleme aktifken her tuş 1/3'ü değiştirir (cooldown bypass)
             if (ab.id === 'wall' && p.wallPreview && p.wallPreview.active) {
                 p.wallPreview.pos = (p.wallPreview.pos + 1) % 3;
@@ -1554,7 +1560,27 @@
         function triggerFoul(foulerPid, victimPid) {
             showFlash('🚨 FAUL! ' + (foulerPid === 'p1' ? 'Mavi' : 'Kırmızı') + ' faul yaptı!', '#ff4444');
             gs.foulAttempts = { p1: 0, p2: 0 };
-            // Start penalty mode after short delay
+            // Anında oyunu durdur (pending penaltı durumu) ve kısa bir geçişten sonra penaltı moduna gir
+            gs.penaltyMode = { pending: true, kicker: victimPid, keeper: foulerPid, active: false, shot: false };
+            const b = gs.ball;
+            // Topu durdur ve uçuş modlarını iptal et — geçiş sırasında hareket etmesin
+            if (b.holder === null) { b.vx = 0; b.vy = 0; b.inAir = false; }
+            b.longPassMode = false; b.longPassOwner = null;
+            b.shotMode = false; b.shotOwner = null;
+            b.teknikPassMode = false;
+            b.lobMode = false;
+            // Bekleyen şarjları temizle ki tuş bırakıldığında bir aksiyon tetiklenmesin
+            ['p1', 'p2'].forEach(pid => {
+                const pp = gs.players[pid];
+                if (!pp) return;
+                pp.passCharging = false;
+                pp.passChargeMs = 0;
+                pp.lobCharging = false;
+                pp.longPassCharging = false;
+                pp.slowOrbCharging = false;
+                pp.smokeCharging = false;
+                if (pp.wallPreview) pp.wallPreview.active = false;
+            });
             setTimeout(() => startPenaltyMode(victimPid, foulerPid), 1200);
         }
 
@@ -1596,6 +1622,19 @@
                 shot: false,
             };
 
+            // Penaltı süresince mevcut duvarları kaldır ve ön izlemeleri kapat
+            if (gs.walls && gs.walls.length) {
+                gs.walls.forEach(w => {
+                    const wx = w.side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
+                    spawnParticles(wx, H / 2, '#ff8800', 18, 4);
+                });
+                gs.walls = [];
+            }
+            ['p1', 'p2'].forEach(pp => {
+                const pl = gs.players[pp];
+                if (pl && pl.wallPreview) pl.wallPreview.active = false;
+            });
+
             spawnParticles(W / 2, H / 2, '#ffaa00', 40, 8);
             showFlash('🏈 PENALTİ BAR!', '#ffaa00');
         }
@@ -1604,9 +1643,18 @@
             const pm = gs.penaltyMode;
             if (!pm || !pm.active || pm.shot) return;
 
-            // Opponent's tackle key speeds up the bar
+            // Rakibin (kalecinin) tackle/throw tuşu barı hızlandırır — klavye veya gamepad
             const oppKey = pm.keeper === 'p1' ? 'KeyF' : 'KeyL';
-            const isHolding = keys[oppKey];
+            let isHolding = !!keys[oppKey];
+            if (!isHolding) {
+                const gpIdx = pm.keeper === 'p1' ? 0 : 1;
+                const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+                const gp = gps[gpIdx];
+                if (gp && gp.connected) {
+                    // Button 2 (X/Square) = throw/tackle (pollGamepadActions ile uyumlu)
+                    isHolding = !!(gp.buttons[2] && gp.buttons[2].pressed);
+                }
+            }
 
             const targetSpeed = isHolding ? pm.baseSpeed * 4 : pm.baseSpeed;
             // Smoothly interpolate speed
@@ -1748,13 +1796,13 @@
             },
             KeyF: () => {
                 if (gs.penaltyMode) return; // Speed boost handled by holding key
-                if (gs.ball.holder === 'p1') throwBall('p1');
-                else attemptTackle('p1');
+                // Sadece top çalmak için — top bizdeyken hiçbir şey yapmasın
+                if (gs.ball.holder !== 'p1') attemptTackle('p1');
             },
             KeyL: () => {
                 if (gs.penaltyMode) return; // Speed boost handled by holding key
-                if (gs.ball.holder === 'p2') throwBall('p2');
-                else attemptTackle('p2');
+                // Sadece top çalmak için — top bizdeyken hiçbir şey yapmasın
+                if (gs.ball.holder !== 'p2') attemptTackle('p2');
             }
         };
 
@@ -1812,6 +1860,25 @@
         // ─────────────── GAMEPAD INPUT ───────────────
         const gpPrevButtons = { p1: [], p2: [] };
 
+        // Klavye veya gamepad'de bir yetenek tuşunun basılı tutulup tutulmadığını kontrol eder
+        // Gamepad eşlemesi pollGamepadActions ile birebir aynı: idx 0→L1(4), 1→R1(5), 2→Y(3), 3→B(1)
+        const ABILITY_GAMEPAD_BUTTONS = [4, 5, 3, 1];
+        function isAbilityHeld(pid, ab) {
+            if (!ab) return false;
+            if (keys[ab.key]) return true;
+            const p = gs.players[pid];
+            if (!p) return false;
+            const abIdx = p.abilities.indexOf(ab);
+            if (abIdx < 0) return false;
+            const btnIdx = ABILITY_GAMEPAD_BUTTONS[abIdx];
+            if (btnIdx == null) return false;
+            const gpIdx = pid === 'p1' ? 0 : 1;
+            const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+            const gp = gps[gpIdx];
+            if (!gp || !gp.connected) return false;
+            return !!(gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed);
+        }
+
         function pollGamepadActions() {
             if (!gameRunning || gameOver) return;
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -1846,10 +1913,9 @@
                     }
                 }
 
-                // Button 2 (X/Square): Throw/Pickup
+                // Button 2 (X/Square): Tackle — top bizdeyken hiçbir şey yapmasın, sadece top çalmaya yarasın
                 if (justPressed(2)) {
-                    if (gs.ball.holder === pid) throwBall(pid);
-                    else attemptTackle(pid);
+                    if (gs.ball.holder !== pid) attemptTackle(pid);
                 }
 
                 // Button 4 (L1/LB): Ability 1
@@ -1891,8 +1957,8 @@
                 return;
             }
 
-            // No movement during penalty mode
-            if (gs.penaltyMode && gs.penaltyMode.active) return;
+            // No movement during penalty mode (also during the pending transition right after a foul)
+            if (gs.penaltyMode && (gs.penaltyMode.active || gs.penaltyMode.pending)) return;
             if (p.pullingTimer > 0) {
                 p.pullingTimer -= dt;
                 const owner = gs.players[p.pulledBy];
@@ -1937,12 +2003,12 @@
                 }
             }
 
-            // Wall: hold-to-place detection
+            // Wall: hold-to-place detection (klavye veya gamepad tuşu basılı tutulunca yerleşir)
             if (p.wallPreview && p.wallPreview.active) {
                 const wAb = p.abilities.find(a => a.id === 'wall');
                 if (wAb) {
                     p.wallPreview.timeoutMs -= dt;
-                    if (keys[wAb.key]) {
+                    if (isAbilityHeld(pid, wAb)) {
                         p.wallPreview.holdMs += dt;
                         if (p.wallPreview.holdMs >= 380) {
                             placeWall(pid);
@@ -2173,6 +2239,9 @@
 
         function updateBall(dt) {
             const b = gs.ball;
+
+            // Faul → penaltı geçişi bekleniyor: top dursun
+            if (gs.penaltyMode && gs.penaltyMode.pending) return;
 
             if (b.holder !== null) return;
 

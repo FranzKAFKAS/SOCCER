@@ -31,7 +31,7 @@ const BALL_R = 10;
 const PLAYER_SPEED = 3.2;
 const BALL_FRICTION = 0.93;
 const THROW_SPEED = 7;
-const TICK_RATE = 60;
+const TICK_RATE = 30;
 const TICK_MS = 1000 / TICK_RATE;
 const WIN_SCORE = 5;
 const GAME_DURATION = 180;
@@ -387,11 +387,12 @@ class Room {
 
   tick(dt) {
     if (!this.gs) return;
+    const tickFrameScale = Math.max(0.5, Math.min(3, dt / (1000 / TICK_RATE)));
     const pids = Object.keys(this.gs.players);
     pids.forEach(pid => this.updatePlayer(pid, dt));
-    this.updateBall();
-    this.updatePenaltyBar();
-    this.checkCollisions(dt);
+    this.updateBall(tickFrameScale);
+    this.updatePenaltyBar(tickFrameScale);
+    this.checkCollisions(dt, tickFrameScale);
     pids.forEach(pid => {
       this.gs.players[pid].abilities.forEach(ab => {
         if (ab.cdLeft > 0) {
@@ -487,11 +488,11 @@ class Room {
     if (this.gs.ball.holder === pid) { this.gs.ball.x = p.x + p.lastDirX * (p.r * 0.7); this.gs.ball.y = p.y + p.lastDirY * (p.r * 0.7); }
   }
 
-  updateBall() {
+  updateBall(frameScale) {
     const b = this.gs.ball;
     if (b.holder !== null) return;
     if (b.lobMode) {
-      b.lobProgress += 0.018;
+      b.lobProgress += 0.018 * frameScale;
       if (b.lobProgress >= 1) {
         b.lobProgress = 1; b.lobMode = false; b.x = b.lobTo.x; b.y = b.lobTo.y; b.vx = 0; b.vy = 0; b.inAir = false;
       } else {
@@ -502,9 +503,10 @@ class Room {
       }
       return;
     }
-    b.x += b.vx; b.y += b.vy;
+    b.x += b.vx * frameScale; b.y += b.vy * frameScale;
     if (!(this.gs.penaltyMode && this.gs.penaltyMode.shot)) {
-      b.vx *= BALL_FRICTION; b.vy *= BALL_FRICTION;
+      const f = Math.pow(BALL_FRICTION, frameScale);
+      b.vx *= f; b.vy *= f;
       if (b.x - BALL_R < FIELD_LEFT) { b.x = FIELD_LEFT + BALL_R; b.vx *= -0.82; }
       if (b.x + BALL_R > FIELD_RIGHT) { b.x = FIELD_RIGHT - BALL_R; b.vx *= -0.82; }
       if (b.y - BALL_R < FIELD_TOP) { b.y = FIELD_TOP + BALL_R; b.vy *= -0.82; }
@@ -514,15 +516,15 @@ class Room {
     if (Math.abs(b.vy) < 0.1) b.vy = 0;
   }
 
-  updatePenaltyBar() {
+  updatePenaltyBar(frameScale) {
     const pm = this.gs.penaltyMode;
     if (!pm || !pm.active || pm.shot) return;
-    pm.barPos += pm.barDir * pm.barSpeed;
+    pm.barPos += pm.barDir * pm.barSpeed * frameScale;
     if (pm.barPos > 1) { pm.barPos = 1; pm.barDir = -1; }
     if (pm.barPos < 0) { pm.barPos = 0; pm.barDir = 1; }
   }
 
-  checkCollisions(dt) {
+  checkCollisions(dt, frameScale) {
     const b = this.gs.ball;
     const pids = Object.keys(this.gs.players);
     if (this.gs.tackleCooldown > 0) this.gs.tackleCooldown -= dt;
@@ -556,7 +558,7 @@ class Room {
 
     if (this.gs.freezeProjectile) {
       const fp = this.gs.freezeProjectile;
-      fp.x += fp.vx; fp.y += fp.vy; fp.life--;
+      fp.x += fp.vx * frameScale; fp.y += fp.vy * frameScale; fp.life -= frameScale;
       const ownerTeam = this.teamOfPid(fp.owner);
       const targetPid = pids.find(pid => this.teamOfPid(pid) !== ownerTeam && Math.sqrt((fp.x - this.gs.players[pid].x) ** 2 + (fp.y - this.gs.players[pid].y) ** 2) < this.gs.players[pid].r + 6);
       if (targetPid) { this.gs.players[targetPid].frozenTimer = 2000; this.gs.freezeProjectile = null; }
@@ -565,7 +567,7 @@ class Room {
 
     if (this.gs.hookProjectile) {
       const hp = this.gs.hookProjectile;
-      hp.x += hp.vx; hp.y += hp.vy; hp.life--;
+      hp.x += hp.vx * frameScale; hp.y += hp.vy * frameScale; hp.life -= frameScale;
       const ownerTeam = this.teamOfPid(hp.owner);
       const targetPid = pids.find(pid => this.teamOfPid(pid) !== ownerTeam && Math.sqrt((hp.x - this.gs.players[pid].x) ** 2 + (hp.y - this.gs.players[pid].y) ** 2) < this.gs.players[pid].r + 6);
       if (targetPid) { this.gs.players[targetPid].pullingTimer = 800; this.gs.players[targetPid].pulledBy = hp.owner; this.gs.hookProjectile = null; }
@@ -573,7 +575,7 @@ class Room {
     }
 
     this.gs.slowOrbProjectiles.forEach((orb, i) => {
-      orb.progress += 0.025;
+      orb.progress += 0.025 * frameScale;
       if (orb.progress >= 1) { this.gs.slowZones.push({ x: orb.targetX, y: orb.targetY, radius: 110, life: orb.duration }); this.gs.slowOrbProjectiles.splice(i, 1); }
       else {
         const t = orb.progress, mx = (orb.startX + orb.targetX) / 2, my = Math.min(orb.startY, orb.targetY) - 150;
@@ -584,7 +586,7 @@ class Room {
     this.gs.slowZones = this.gs.slowZones.filter(z => { z.life -= dt; return z.life > 0; });
 
     this.gs.smokeProjectiles.forEach((orb, i) => {
-      orb.progress += 0.022;
+      orb.progress += 0.022 * frameScale;
       if (orb.progress >= 1) { this.gs.smokeZones.push({ x: orb.targetX, y: orb.targetY, radius: 145, life: orb.duration }); this.gs.smokeProjectiles.splice(i, 1); }
       else { orb.x = orb.startX + (orb.targetX - orb.startX) * orb.progress; orb.y = orb.startY + (orb.targetY - orb.startY) * orb.progress; }
     });
