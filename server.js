@@ -7,7 +7,10 @@ const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+// Real-time oyun: permessage-deflate KAPALI. Küçük & sık paketleri sıkıştırmak
+// CPU + latency ekler, fayda 0. Shared host'ta net bir kazanç.
+const wss = new WebSocketServer({ server, perMessageDeflate: false });
+
 
 // Gzip/Deflate: 200 KB inline HTML'i ~30 KB'a indirir, TTFB transfer süresini ciddi düşürür.
 app.use(compression({ threshold: 1024 }));
@@ -1593,7 +1596,9 @@ class Room {
     if (this.gs.penaltyMode) slim.penaltyMode = this.gs.penaltyMode;
     if (this.gs.blindTimer > 0) { slim.blindTimer = Math.round(this.gs.blindTimer); slim.blindOwner = this.gs.blindOwner; }
     if (this.gs.invisBallTimer > 0) slim.invisBallTimer = Math.round(this.gs.invisBallTimer);
-    const payload = { type: 'state', gs: slim };
+    // Server timestamp: client interpolation timeline'ı bunu kullanır.
+    // Network burst halinde paketler aynı anda gelse bile original 33ms aralık korunur.
+    const payload = { type: 'state', gs: slim, t: Date.now() };
     if (flashes.length) payload.flashes = flashes;
     this.broadcast(payload);
   }
@@ -1710,7 +1715,13 @@ class Room {
 }
 
 // ─────────────── WS HANDLER ───────────────
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // Nagle's algorithm KAPALI: küçük WS frame'lerinin TCP tarafında biriktirilip
+  // patlamalar halinde yollanmasını engeller. Railway/shared hosting'de
+  // "snap interval min=0 max=144ms" gibi burstiness'ı düzeltir.
+  try {
+    if (req && req.socket && req.socket.setNoDelay) req.socket.setNoDelay(true);
+  } catch (_) {}
   ws.roomId = null; ws.pid = null;
   ws.on('message', (raw) => {
     let msg;

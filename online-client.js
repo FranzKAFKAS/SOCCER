@@ -3240,9 +3240,33 @@
                         blindTimer: slim.blindTimer || 0,
                         invisBallTimer: slim.invisBallTimer || 0,
                     });
-                    // Interpolation için snapshot kaydet (sadece rakip + top pozisyonu)
+                    // Interpolation için snapshot kaydet.
+                    // KRITIK: Server timestamp'i (msg.t) kullanıyoruz, alındığı an değil.
+                    // Network burst durumunda (3 paket aynı anda gelir) lokal saatte tümü "şimdi"
+                    // gözükür ama server'da 33ms aralıkla yollanmıştır. Server saatini lokal
+                    // saate eşleyerek (clockOffset) original timeline'ı koruyoruz.
+                    const nowLocal = performance.now();
+                    const serverT = (typeof msg.t === 'number') ? msg.t : null;
+                    if (serverT != null) {
+                        // İlk paket: offset'i ölç. Sonraki paketler aynı offset'le mapping.
+                        // Eğer offset zamanla küçük drift gösterirse adapt et (clock skew).
+                        if (window.__serverClockOffset === undefined) {
+                            window.__serverClockOffset = nowLocal - serverT;
+                        } else {
+                            // Yumuşak offset düzeltmesi: en kısa gözlemlenen RTT'yi yakala
+                            const candidateOffset = nowLocal - serverT;
+                            // Sadece "şimdiye kadarki en küçük gecikme" offset'i — en az lag'lı
+                            // paket bizim baseline'ımız. Patlamalar bu baseline'ın üzerine biner.
+                            if (candidateOffset < window.__serverClockOffset) {
+                                window.__serverClockOffset = candidateOffset;
+                            }
+                        }
+                    }
+                    const mappedT = serverT != null
+                        ? (serverT + window.__serverClockOffset)
+                        : nowLocal;
                     const snap = {
-                        t: performance.now(),
+                        t: mappedT,
                         players: {},
                         ball: { x: gs.ball.x, y: gs.ball.y, holder: gs.ball.holder },
                     };
