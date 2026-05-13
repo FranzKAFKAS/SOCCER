@@ -446,7 +446,7 @@
             if (ab.id === 'clone') {
                 ab.active = true;
                 ab.cdLeft = ab.cd;
-                const goUp = Math.random() < 0.5;
+                const goUp = pid === 'p1';
                 const realDY = goUp ? -72 : 72;
                 const cloneY = p.y + (goUp ? 72 : -72);
                 const oldY = p.y;

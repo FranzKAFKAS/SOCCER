@@ -544,7 +544,7 @@
             if (ab.id === 'clone') {
                 ab.active = true;
                 ab.cdLeft = ab.cd;
-                const goUp = Math.random() < 0.5;
+                const goUp = pid === 'p1';
                 const realDY = goUp ? -72 : 72;
                 const cloneY = p.y + (goUp ? 72 : -72);
                 const oldY = p.y;
@@ -3596,6 +3596,8 @@
                 const me = gs.players[myPid];
                 if (me) {
                     if (__pred.x === null) { __pred.x = me.x; __pred.y = me.y; }
+                    const predFrameStartX = __pred.x;
+                    const predFrameStartY = __pred.y;
 
                     // ── RECONCILE ──────────────────────────────────────────────────────
                     // authX = me.x: son snapshot'taki server pozisyonu (no self-interp).
@@ -3685,6 +3687,17 @@
                     if (__pred.lastDirX || __pred.lastDirY) {
                         me.lastDirX = __pred.lastDirX;
                         me.lastDirY = __pred.lastDirY;
+                    }
+                    // Klonlar: updatePlayer çalışmadığı için __pred ile senkron taşı (sunucu tick arası takılma gider)
+                    if (gameStarted && me.clones && me.clones.length) {
+                        const ddx = __pred.x - predFrameStartX;
+                        const ddy = __pred.y - predFrameStartY;
+                        if (ddx || ddy) {
+                            me.clones.forEach(c => {
+                                c.x += ddx;
+                                c.y += ddy;
+                            });
+                        }
                     }
                     // Top sahibimizse top da bizimle gelsin (sunucu zaten yapacak ama gecikmesin)
                     if (gs.ball && gs.ball.holder === myPid) {
@@ -3822,26 +3835,6 @@
                     last.ball = { x: b.x, y: b.y, holder: b.holder };
                 }
             };
-            // Ball'u client-side predict modda başlat: süre RTT'ye göre dinamik
-            // Hedef: server snapshot'larının "pas işlendi" state'i client'a ulaşana kadar predict
-            // = RTT (input→server→broadcast→client) + küçük güvenlik payı
-            const startBallPredict = (defaultDuration) => {
-                const rd = window.__rttDiag;
-                let rttEst = 150;
-                if (rd && rd.samples.length) {
-                    const sorted = rd.samples.slice().sort((a, b) => a - b);
-                    rttEst = sorted[Math.floor(sorted.length / 2)]; // median (spike'lardan korunaklı)
-                }
-                const dur = Math.max(defaultDuration, Math.min(400, rttEst * 1.25 + 60));
-                __ballHandoffUntil = 0;
-                __ballPredict.active = true;
-                __ballPredict.until = performance.now() + dur;
-                __ballPredict.x = b.x;
-                __ballPredict.y = b.y;
-                __ballPredict.vx = b.vx || 0;
-                __ballPredict.vy = b.vy || 0;
-                __ballPredict.lastIntegrated = performance.now();
-            };
 
             if (extra.action === 'pass_press') {
                 if (gs.penaltyMode && gs.penaltyMode.active) return;
@@ -3931,18 +3924,24 @@
                     ab.cdLeft = ab.cd; ab.active = true;
                     return;
                 }
-                // SelfPass — anında ileri lobla
+                // SelfPass — uzun pas gibi predict yok; top __pred ile tutarlı başlar
                 if (ab.id === 'selfpass' && b.holder === myPid) {
+                    const ldir = Math.hypot(me.lastDirX, me.lastDirY) || 1;
+                    const rdx = me.lastDirX / ldir, rdy = me.lastDirY / ldir;
+                    const px = (__pred.x != null && Number.isFinite(__pred.x)) ? __pred.x : me.x;
+                    const py = (__pred.y != null && Number.isFinite(__pred.y)) ? __pred.y : me.y;
                     const angle = 0.35;
                     const cos = Math.cos(angle), sin = Math.sin(angle);
-                    const kx = me.lastDirX * cos - me.lastDirY * sin;
-                    const ky = me.lastDirX * sin + me.lastDirY * cos;
+                    const kx = rdx * cos - rdy * sin;
+                    const ky = rdx * sin + rdy * cos;
                     b.holder = null; b.inAir = true;
                     b.vx = kx * 9.5; b.vy = ky * 9.5;
+                    b.x = px + rdx * (me.r * 0.7);
+                    b.y = py + rdy * (me.r * 0.7);
+                    __ballVisX = b.x; __ballVisY = b.y;
                     me.poweredTimer = Math.max(me.poweredTimer || 0, 1200);
                     ab.cdLeft = ab.cd; ab.active = true;
                     syncBallSnapshot();
-                    startBallPredict(250);
                     return;
                 }
                 // Speedboost — anında boost
@@ -3951,8 +3950,31 @@
                     ab.cdLeft = ab.cd; ab.active = true;
                     return;
                 }
+                // Klon — sunucu ile aynı deterministik yön + __pred; anında görünür, sunucu ile hizalı
+                if (ab.id === 'clone') {
+                    ab.cdLeft = ab.cd; ab.active = true;
+                    const goUp = myPid === 'p1';
+                    const realDY = goUp ? -72 : 72;
+                    const px = (__pred.x != null && Number.isFinite(__pred.x)) ? __pred.x : me.x;
+                    const py = (__pred.y != null && Number.isFinite(__pred.y)) ? __pred.y : me.y;
+                    const cloneY = py + (goUp ? 72 : -72);
+                    const oldY = py;
+                    const newY = Math.max(FIELD_TOP + 15, Math.min(FIELD_BOTTOM - 15, py + realDY));
+                    me.y = newY;
+                    __pred.y = newY;
+                    me.clones = [{
+                        x: px,
+                        y: Math.max(FIELD_TOP + 15, Math.min(FIELD_BOTTOM - 15, cloneY)),
+                        life: ab.duration,
+                    }];
+                    spawnParticles(px, oldY, me.color, 20, 4);
+                    spawnParticles(px, newY, me.color, 10, 3);
+                    spawnParticles(px, me.clones[0].y, me.color, 10, 3);
+                    showFlash('🧬 KLON!', me.color);
+                    return;
+                }
                 // Diğer instant skill'ler için sadece HUD cooldown
-                const instantHud = ['freeze', 'reverse', 'hook', 'invisball', 'blind', 'shot', 'clone', 'geopas'];
+                const instantHud = ['freeze', 'reverse', 'hook', 'invisball', 'blind', 'shot', 'geopas'];
                 if (instantHud.includes(ab.id)) {
                     ab.cdLeft = ab.cd; ab.active = true;
                 }

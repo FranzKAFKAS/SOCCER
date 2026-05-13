@@ -306,7 +306,8 @@ class Room {
     switch (ab.id) {
       case 'clone': {
         ab.active = true; ab.cdLeft = ab.cd;
-        const goUp = Math.random() < 0.5;
+        // Deterministik (random değil): online client ile aynı yön, gecikmesiz öngörü
+        const goUp = pid === 'p1';
         const realDY = goUp ? -72 : 72;
         const cloneY = p.y + (goUp ? 72 : -72);
         p.y = Math.max(FIELD_TOP + 15, Math.min(FIELD_BOTTOM - 15, p.y + realDY));
