@@ -18,6 +18,142 @@
         }
         updateFieldBounds();
 
+        // ── Offscreen field cache ────────────────────────────────────────────────
+        // drawField() statik zemin+çizgiler+kale kısmı her frame sıfırdan çiziliyor:
+        //   1 LinearGradient + ~10 stroke + arc + 2 text + border = pahalı.
+        // Çözüm: statik parçaları offscreen canvas'a bir kere çiz, her frame drawImage ile kopyala.
+        let __fieldCanvas = null;
+        let __fieldCtx = null;
+        let __fieldDirty = true;   // resize veya alan değişince true → yeniden çiz
+
+        function invalidateFieldCache() { __fieldDirty = true; }
+
+        function ensureFieldCache() {
+            if (!__fieldCanvas || __fieldCanvas.width !== W || __fieldCanvas.height !== H) {
+                __fieldCanvas = document.createElement('canvas');
+                __fieldCanvas.width = W;
+                __fieldCanvas.height = H;
+                __fieldCtx = __fieldCanvas.getContext('2d');
+                __fieldDirty = true;
+            }
+            if (!__fieldDirty) return;
+            __fieldDirty = false;
+            const fctx = __fieldCtx;
+            fctx.clearRect(0, 0, W, H);
+
+            // Background
+            fctx.fillStyle = '#0d1f12';
+            fctx.fillRect(0, 0, W, H);
+
+            // Field gradient
+            const grad = fctx.createLinearGradient(FIELD_LEFT, 0, FIELD_RIGHT, 0);
+            grad.addColorStop(0, '#0d2818');
+            grad.addColorStop(0.5, '#0f3318');
+            grad.addColorStop(1, '#0d2818');
+            fctx.fillStyle = grad;
+            fctx.beginPath();
+            fctx.roundRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, 12);
+            fctx.fill();
+
+            // Yard lines
+            fctx.strokeStyle = 'rgba(255,255,255,0.07)';
+            fctx.lineWidth = 1;
+            for (let x = PLAY_LEFT + 60; x < PLAY_RIGHT; x += 60) {
+                fctx.beginPath(); fctx.moveTo(x, FIELD_TOP); fctx.lineTo(x, FIELD_BOTTOM); fctx.stroke();
+            }
+
+            // Center line
+            fctx.strokeStyle = 'rgba(255,255,255,0.18)';
+            fctx.lineWidth = 2;
+            fctx.setLineDash([8, 8]);
+            fctx.beginPath(); fctx.moveTo(W / 2, FIELD_TOP); fctx.lineTo(W / 2, FIELD_BOTTOM); fctx.stroke();
+            fctx.setLineDash([]);
+
+            // Center circle
+            fctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            fctx.lineWidth = 1.5;
+            fctx.beginPath(); fctx.arc(W / 2, H / 2, 50, 0, Math.PI * 2); fctx.stroke();
+
+            // P1 End Zone (Left)
+            fctx.fillStyle = 'rgba(0, 212, 255, 0.08)';
+            fctx.fillRect(FIELD_LEFT, FIELD_TOP, END_ZONE_W, FIELD_BOTTOM - FIELD_TOP);
+            fctx.strokeStyle = 'rgba(0,212,255,0.35)';
+            fctx.lineWidth = 2;
+            fctx.beginPath(); fctx.moveTo(PLAY_LEFT, FIELD_TOP); fctx.lineTo(PLAY_LEFT, FIELD_BOTTOM); fctx.stroke();
+
+            // P2 End Zone (Right)
+            fctx.fillStyle = 'rgba(255, 77, 109, 0.08)';
+            fctx.fillRect(PLAY_RIGHT, FIELD_TOP, END_ZONE_W, FIELD_BOTTOM - FIELD_TOP);
+            fctx.strokeStyle = 'rgba(255,77,109,0.35)';
+            fctx.lineWidth = 2;
+            fctx.beginPath(); fctx.moveTo(PLAY_RIGHT, FIELD_TOP); fctx.lineTo(PLAY_RIGHT, FIELD_BOTTOM); fctx.stroke();
+
+            // End zone labels
+            fctx.save();
+            fctx.translate(FIELD_LEFT + END_ZONE_W / 2, H / 2);
+            fctx.rotate(-Math.PI / 2);
+            fctx.fillStyle = 'rgba(0,212,255,0.35)';
+            fctx.font = 'bold 12px Orbitron, monospace';
+            fctx.textAlign = 'center';
+            fctx.fillText('P1 GÖL', 0, 0);
+            fctx.restore();
+
+            fctx.save();
+            fctx.translate(PLAY_RIGHT + END_ZONE_W / 2, H / 2);
+            fctx.rotate(Math.PI / 2);
+            fctx.fillStyle = 'rgba(255,77,109,0.35)';
+            fctx.font = 'bold 12px Orbitron, monospace';
+            fctx.textAlign = 'center';
+            fctx.fillText('P2 GÖL', 0, 0);
+            fctx.restore();
+
+            // Shot goals (static part — no shadow in offscreen ctx)
+            _drawShotGoalStatic(fctx, PLAY_LEFT, H / 2, SHOT_GOAL_H, '#00d4ff', -1);
+            _drawShotGoalStatic(fctx, PLAY_RIGHT, H / 2, SHOT_GOAL_H, '#ff4d6d', 1);
+
+            // Field border
+            fctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            fctx.lineWidth = 2;
+            fctx.beginPath();
+            fctx.roundRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, 12);
+            fctx.stroke();
+        }
+
+        // Kale statik çizimi (shadow olmadan offscreen'e)
+        function _drawShotGoalStatic(fctx, x, cy, h, color, dir) {
+            const goalTop = cy - h / 2;
+            const goalBot = cy + h / 2;
+            const endZoneStart = dir === -1 ? FIELD_LEFT : x;
+            const endZoneWidth = dir === -1 ? (x - FIELD_LEFT) : (FIELD_RIGHT - x);
+            const fillGrad = fctx.createLinearGradient(
+                dir === -1 ? endZoneStart : endZoneStart + endZoneWidth, 0,
+                dir === -1 ? endZoneStart + endZoneWidth : endZoneStart, 0
+            );
+            fillGrad.addColorStop(0, color + '00');
+            fillGrad.addColorStop(1, color + '33');
+            fctx.fillStyle = fillGrad;
+            fctx.fillRect(endZoneStart, goalTop, endZoneWidth, h);
+            const postLen = 24;
+            fctx.strokeStyle = color;
+            fctx.lineWidth = 3;
+            // Top post
+            fctx.beginPath();
+            fctx.moveTo(x, goalTop);
+            fctx.lineTo(x + dir * postLen, goalTop);
+            fctx.stroke();
+            // Bottom post
+            fctx.beginPath();
+            fctx.moveTo(x, goalBot);
+            fctx.lineTo(x + dir * postLen, goalBot);
+            fctx.stroke();
+            // Side line
+            fctx.beginPath();
+            fctx.moveTo(x, goalTop);
+            fctx.lineTo(x, goalBot);
+            fctx.stroke();
+        }
+        // ────────────────────────────────────────────────────────────────────────
+
         function resizeGame() {
             // Keep internal resolution strictly 900x520 to match the server!
             W = 900;
@@ -25,6 +161,7 @@
             canvas.width = W;
             canvas.height = H;
             updateFieldBounds();
+            invalidateFieldCache();
             if (!gameRunning) {
                 drawField();
             }
@@ -279,17 +416,29 @@
         }
 
         function drawParticles() {
+            if (!particles.length) return;
+            // Renk gruplarına böl: her grup için save/restore/shadowBlur bir kez
+            // (her parçacık için ayrı yapınca ~20 GPU blur/frame = pahalı)
+            const byColor = {};
             particles.forEach(p => {
-                ctx.save();
-                ctx.globalAlpha = p.life;
-                ctx.fillStyle = p.color;
-                ctx.shadowColor = p.color;
-                ctx.shadowBlur = 6;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
+                if (!byColor[p.color]) byColor[p.color] = [];
+                byColor[p.color].push(p);
             });
+            ctx.save();
+            ctx.shadowBlur = 5;
+            for (const color in byColor) {
+                ctx.shadowColor = color;
+                ctx.fillStyle = color;
+                byColor[color].forEach(p => {
+                    ctx.globalAlpha = p.life;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+            ctx.restore();
         }
 
         // ─────────────── DEBUG EVENT LOGGER ───────────────
@@ -2030,91 +2179,11 @@
 
         // ─────────────── DRAW ───────────────
         function drawField() {
-            // Background
-            ctx.fillStyle = '#0d1f12';
-            ctx.fillRect(0, 0, W, H);
+            // Statik saha: offscreen cache'den tek drawImage — gradient/stroke loop yok
+            ensureFieldCache();
+            ctx.drawImage(__fieldCanvas, 0, 0);
 
-            // Field
-            const grad = ctx.createLinearGradient(FIELD_LEFT, 0, FIELD_RIGHT, 0);
-            grad.addColorStop(0, '#0d2818');
-            grad.addColorStop(0.5, '#0f3318');
-            grad.addColorStop(1, '#0d2818');
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.roundRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, 12);
-            ctx.fill();
-
-            // Yard lines
-            ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-            ctx.lineWidth = 1;
-            for (let x = PLAY_LEFT + 60; x < PLAY_RIGHT; x += 60) {
-                ctx.beginPath();
-                ctx.moveTo(x, FIELD_TOP);
-                ctx.lineTo(x, FIELD_BOTTOM);
-                ctx.stroke();
-            }
-
-            // Center line
-            ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([8, 8]);
-            ctx.beginPath();
-            ctx.moveTo(W / 2, FIELD_TOP);
-            ctx.lineTo(W / 2, FIELD_BOTTOM);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Center circle
-            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(W / 2, H / 2, 50, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // P1 End Zone (Left)
-            ctx.fillStyle = 'rgba(0, 212, 255, 0.08)';
-            ctx.fillRect(FIELD_LEFT, FIELD_TOP, END_ZONE_W, FIELD_BOTTOM - FIELD_TOP);
-            ctx.strokeStyle = 'rgba(0,212,255,0.35)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(PLAY_LEFT, FIELD_TOP);
-            ctx.lineTo(PLAY_LEFT, FIELD_BOTTOM);
-            ctx.stroke();
-
-            // P2 End Zone (Right)
-            ctx.fillStyle = 'rgba(255, 77, 109, 0.08)';
-            ctx.fillRect(PLAY_RIGHT, FIELD_TOP, END_ZONE_W, FIELD_BOTTOM - FIELD_TOP);
-            ctx.strokeStyle = 'rgba(255,77,109,0.35)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(PLAY_RIGHT, FIELD_TOP);
-            ctx.lineTo(PLAY_RIGHT, FIELD_BOTTOM);
-            ctx.stroke();
-
-            // End zone labels
-            ctx.save();
-            ctx.translate(FIELD_LEFT + END_ZONE_W / 2, H / 2);
-            ctx.rotate(-Math.PI / 2);
-            ctx.fillStyle = 'rgba(0,212,255,0.35)';
-            ctx.font = 'bold 12px Orbitron, monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText('P1 GÖL', 0, 0);
-            ctx.restore();
-
-            ctx.save();
-            ctx.translate(PLAY_RIGHT + END_ZONE_W / 2, H / 2);
-            ctx.rotate(Math.PI / 2);
-            ctx.fillStyle = 'rgba(255,77,109,0.35)';
-            ctx.font = 'bold 12px Orbitron, monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText('P2 GÖL', 0, 0);
-            ctx.restore();
-
-            // ── ŞUT KALELERİ (Her zaman görünür) ──
-            drawShotGoal(PLAY_LEFT, H / 2, SHOT_GOAL_H, '#00d4ff', -1);
-            drawShotGoal(PLAY_RIGHT, H / 2, SHOT_GOAL_H, '#ff4d6d', 1);
-
-            // ── PENALTY GOAL ──
+            // ── PENALTY GOAL (dinamik — pulse efekti var, cache'lenemez) ──
             if (gs.penaltyMode && gs.penaltyMode.active) {
                 const pm = gs.penaltyMode;
                 const gx = pm.goalX;
@@ -2174,50 +2243,30 @@
         // Helper: draw the always-visible shot goal at the end zone line
         // dir: -1 = sol kale (postlar end zone'a doğru sola uzanır)
         //      +1 = sağ kale (postlar end zone'a doğru sağa uzanır)
+        // drawShotGoal artık offscreen cache'de (_drawShotGoalStatic). Bu fonksiyon
+        // sadece penaltı akışında dinamik shadow gerektiren özel durumlar için kalıyor.
         function drawShotGoal(x, cy, h, color, dir) {
             const goalTop = cy - h / 2;
             const goalBot = cy + h / 2;
-
             ctx.save();
-
-            // End zone içinde gol bölgesi vurgu dolgusu
-            const endZoneStart = dir === -1 ? FIELD_LEFT : x;
-            const endZoneWidth = dir === -1 ? (x - FIELD_LEFT) : (FIELD_RIGHT - x);
-            const fillGrad = ctx.createLinearGradient(
-                dir === -1 ? endZoneStart : endZoneStart + endZoneWidth, 0,
-                dir === -1 ? endZoneStart + endZoneWidth : endZoneStart, 0
-            );
-            fillGrad.addColorStop(0, color + '00');
-            fillGrad.addColorStop(1, color + '33');
-            ctx.fillStyle = fillGrad;
-            ctx.fillRect(endZoneStart, goalTop, endZoneWidth, h);
-
-            // Üst & alt postlar (end zone içine uzanır)
-            const postLen = 24;
             ctx.shadowColor = color;
             ctx.shadowBlur = 10;
             ctx.strokeStyle = color;
             ctx.lineWidth = 4;
             ctx.lineCap = 'round';
+            const postLen = 24;
             ctx.beginPath();
-            ctx.moveTo(x, goalTop);
-            ctx.lineTo(x + dir * postLen, goalTop);
-            ctx.moveTo(x, goalBot);
-            ctx.lineTo(x + dir * postLen, goalBot);
+            ctx.moveTo(x, goalTop); ctx.lineTo(x + dir * postLen, goalTop);
+            ctx.moveTo(x, goalBot); ctx.lineTo(x + dir * postLen, goalBot);
             ctx.stroke();
-
-            // Gol ağzı (kesikli dikey çizgi)
             ctx.shadowBlur = 0;
-            ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             ctx.setLineDash([6, 4]);
             ctx.beginPath();
-            ctx.moveTo(x, goalTop);
-            ctx.lineTo(x, goalBot);
+            ctx.moveTo(x, goalTop); ctx.lineTo(x, goalBot);
             ctx.stroke();
             ctx.setLineDash([]);
             ctx.lineCap = 'butt';
-
             ctx.restore();
         }
 
@@ -3362,6 +3411,17 @@
             socket.send(JSON.stringify({ type: 'input', dx, dy, penaltyBarBoost, wallHeld }));
         }
 
+        // ── Teşhis: FPS / frame-time ve prediction drift ────────────────────────
+        // [fps]  → gerçek frame süreleri; spike'lar frame drop = rendering sorunu
+        // [pred] → errLen dağılımı; yüksek median = reconcile hâlâ aktif demektir
+        const __diag = {
+            ft: [],          // frame times
+            err: [],         // errLen per frame (prediction vs server)
+            drawMs: [],      // drawField+players+ball süresi
+            reportAt: 0,
+            count: 0,
+        };
+
         let __lastFrameAt = 0;
         // Override local gameLoop with prediction
         gameLoop = function (timestamp) {
@@ -3372,6 +3432,7 @@
             if (!isFinite(dt) || dt <= 0) dt = 16;
             if (dt > 50) dt = 50;
             __lastFrameAt = now;
+            if (__lastFrameAt && __diag.count < 12) __diag.ft.push(dt);
             if (gameStarted && gs && gs.ball && gs.players) {
                 // ─── INTERPOLATION: rakip + top için pürüzsüz hareket ───
                 // Tek snapshot varsa onu render et (predict sonrası buffer temizlendi)
@@ -3474,6 +3535,7 @@
                         __pred.y += errY * factor;
                     }
                     // errLen ≤ 14: normal network latency kaynaklı steady-state drift → yut
+                    if (__diag.count < 12) __diag.err.push(errLen);
 
                     // Slide aktifse pred pos'u slide velocity ile ilerlet
                     if (me.slideTimer > 0) {
@@ -3546,6 +3608,7 @@
                     }
                 }
 
+                const _t0draw = performance.now();
                 drawField();
                 drawSlowZones();
                 drawFreezeProjectile();
@@ -3557,7 +3620,42 @@
                 updateParticles();
                 drawParticles();
                 drawPenaltyBar();
+                if (__diag.count < 12) __diag.drawMs.push(performance.now() - _t0draw);
                 sendSocketInput();
+
+                // ── Teşhis raporu (5sn'de bir, ilk 60sn) ──────────────────────
+                if (__diag.count < 12 && now > __diag.reportAt && __diag.ft.length > 30) {
+                    const ftArr = __diag.ft;
+                    const ftAvg = ftArr.reduce((a, b) => a + b, 0) / ftArr.length;
+                    const ftMax = Math.max(...ftArr);
+                    const drops = ftArr.filter(v => v > 20).length;
+                    const hardDrops = ftArr.filter(v => v > 33).length;
+
+                    const errArr = __diag.err;
+                    const errAvg = errArr.length ? errArr.reduce((a, b) => a + b, 0) / errArr.length : 0;
+                    const errMax = errArr.length ? Math.max(...errArr) : 0;
+                    const errOver14 = errArr.filter(v => v > 14).length;
+
+                    const dArr = __diag.drawMs;
+                    const dAvg = dArr.length ? dArr.reduce((a, b) => a + b, 0) / dArr.length : 0;
+                    const dMax = dArr.length ? Math.max(...dArr) : 0;
+
+                    console.log(
+                        `[fps] avg=${ftAvg.toFixed(1)}ms max=${ftMax.toFixed(0)}ms` +
+                        ` drops>20ms=${drops}/${ftArr.length} drops>33ms=${hardDrops}`
+                    );
+                    console.log(
+                        `[pred] errAvg=${errAvg.toFixed(1)}px errMax=${errMax.toFixed(0)}px` +
+                        ` reconcileActivations=${errOver14}/${errArr.length}`
+                    );
+                    console.log(
+                        `[draw] avg=${dAvg.toFixed(2)}ms max=${dMax.toFixed(1)}ms`
+                    );
+                    __diag.ft = []; __diag.err = []; __diag.drawMs = [];
+                    __diag.reportAt = now + 5000;
+                    __diag.count++;
+                }
+                if (__diag.reportAt === 0) __diag.reportAt = now + 5000;
             }
             requestAnimationFrame(gameLoop);
         };
