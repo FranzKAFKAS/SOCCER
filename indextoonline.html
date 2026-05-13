@@ -4235,7 +4235,11 @@
         // Override local gameLoop with prediction
         gameLoop = function (timestamp) {
             const now = performance.now();
-            const dt = __lastFrameAt ? (now - __lastFrameAt) : 16;
+            // Client dt'yi server tick clamp'ı (0.5x–3x = 8–50ms) ile aynı tut.
+            // Sekme arka plana atılınca veya RAF spike olursa pred'in fırlamaması için kritik.
+            let dt = __lastFrameAt ? (now - __lastFrameAt) : 16;
+            if (!isFinite(dt) || dt <= 0) dt = 16;
+            if (dt > 50) dt = 50;
             __lastFrameAt = now;
             if (gameStarted && gs && gs.ball && gs.players) {
                 // ─── INTERPOLATION: rakip + top için pürüzsüz hareket ───
@@ -4293,10 +4297,20 @@
                 const me = gs.players[myPid];
                 if (me) {
                     if (__pred.x === null) { __pred.x = me.x; __pred.y = me.y; }
-                    // Server pozisyonuna yumuşak lerp (sapma düzeltmesi)
-                    const reconcile = 0.18;
-                    __pred.x += (me.x - __pred.x) * reconcile;
-                    __pred.y += (me.y - __pred.y) * reconcile;
+                    // Akıllı reconcile: küçük sapmayı yut, orta yumuşak düzelt, büyük snap.
+                    // Eski sabit 0.18 lerp her frame %18 server'a çekiyordu → "geri gelme" his.
+                    const errX = me.x - __pred.x;
+                    const errY = me.y - __pred.y;
+                    const errLen = Math.hypot(errX, errY);
+                    if (errLen > 80) {
+                        __pred.x = me.x; __pred.y = me.y;
+                    } else if (errLen > 3) {
+                        // 220ms zaman sabitli yumuşak düzelt (frame-rate bağımsız)
+                        const factor = Math.min(1, dt / 220);
+                        __pred.x += errX * factor;
+                        __pred.y += errY * factor;
+                    }
+                    // errLen <= 3: küçük titremeleri yut (no-op)
 
                     // Slide aktifse pred pos'u slide velocity ile ilerlet
                     if (me.slideTimer > 0) {
@@ -4634,7 +4648,7 @@
             const sig = qdx + '\0' + qdy + '\0' + (penaltyBarBoost ? 1 : 0) + '\0' + (wallHeld ? 1 : 0);
             const active = qdx !== 0 || qdy !== 0 || penaltyBarBoost || wallHeld;
             const changed = sig !== __inputSendSig;
-            const heartbeat = active && (now - __lastInputPacketSentAt >= 110);
+            const heartbeat = active && (now - __lastInputPacketSentAt >= 50);
             if (!changed && !heartbeat) return;
             // Aynı vektörü sürekli yollamayı kes; yön değişince anında yolla. Tampon şişerse yine de yön değişimini düşürme.
             if (socket.bufferedAmount > 16384 && !changed) return;
