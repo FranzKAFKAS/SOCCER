@@ -3484,7 +3484,7 @@
                     const errX = authX - __pred.x;
                     const errY = authY - __pred.y;
                     const errLen = Math.hypot(errX, errY);
-                    const suddenJump = errLen > 35 && errLen > __prevErrLen * 2;
+                    const suddenJump = errLen > 65 && errLen > __prevErrLen * 2;
                     __prevErrLen = errLen;
                     if (errLen > 80 || suddenJump) {
                         __pred.x = authX; __pred.y = authY;
