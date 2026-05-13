@@ -3098,9 +3098,11 @@
         // Ball client-side prediction: pas/şut sonrası top'u server snapshot'larından bağımsız
         // olarak client physics ile ilerlet. RTT yüksek olduğunda topun "lastikli" görünmesini engeller.
         // until = 0 ise pasif (interpolation kullanılır)
-        const __ballPredict = { active: false, until: 0, x: 0, y: 0, vx: 0, vy: 0, lastIntegrated: 0 };
-        // Predict bitince sunucu interp'ine sert geçiş → top "ışınlanır". Kısa handoff ile yumuşat.
+        const __ballPredict = { active: false, until: 0, x: 0, y: 0, vx: 0, vy: 0, lastIntegrated: 0, fromPass: false };
+        // Pas sonrası top: rakip için 38ms interp gerekli ama kendi pasında topu "geride" göstermek lag hissi verir.
+        let __ballPassSnapUntil = 0; // bu süre boyunca top interp için daha az gecikme (≈10ms)
         let __ballHandoffUntil = 0;
+        let __ballHandoffFast = false; // pas sonrası handoff daha kısa/sert
         let __ballVisX = NaN, __ballVisY = NaN;
         // Input WS: her frame JSON atmak tamponu doldurup bufferedAmount ile drop edilince takılma yapıyordu
         let __inputSendSig = '';
@@ -3450,8 +3452,11 @@
                 // Client da AYNI katsayıyı kullanmalı yoksa predict bitince ışınlanma olur.
                 if (__ballPredict.active) {
                     if (now >= __ballPredict.until) {
+                        const wasPass = __ballPredict.fromPass;
                         __ballPredict.active = false;
-                        __ballHandoffUntil = now + 220;
+                        __ballPredict.fromPass = false;
+                        __ballHandoffFast = wasPass;
+                        __ballHandoffUntil = now + (wasPass ? 105 : 185);
                         __ballVisX = __ballPredict.x;
                         __ballVisY = __ballPredict.y;
                     } else {
@@ -3473,19 +3478,20 @@
                         ballIx = s.ball.x;
                         ballIy = s.ball.y;
                     } else {
-                        const renderTime = now - __INTERP_DELAY_MS;
+                        const ballDelay = (now < __ballPassSnapUntil) ? 10 : __INTERP_DELAY_MS;
+                        const renderTimeBall = now - ballDelay;
                         let s0 = __snapshots[0], s1 = __snapshots[1];
                         for (let i = 0; i < __snapshots.length - 1; i++) {
-                            if (__snapshots[i].t <= renderTime && __snapshots[i + 1].t >= renderTime) {
+                            if (__snapshots[i].t <= renderTimeBall && __snapshots[i + 1].t >= renderTimeBall) {
                                 s0 = __snapshots[i]; s1 = __snapshots[i + 1]; break;
                             }
                         }
-                        if (renderTime > __snapshots[__snapshots.length - 1].t) {
+                        if (renderTimeBall > __snapshots[__snapshots.length - 1].t) {
                             s0 = __snapshots[__snapshots.length - 2];
                             s1 = __snapshots[__snapshots.length - 1];
                         }
                         const span = s1.t - s0.t;
-                        const frac = span > 0 ? Math.max(0, Math.min(1.2, (renderTime - s0.t) / span)) : 1;
+                        const frac = span > 0 ? Math.max(0, Math.min(1.2, (renderTimeBall - s0.t) / span)) : 1;
                         ballIx = s0.ball.x + (s1.ball.x - s0.ball.x) * frac;
                         ballIy = s0.ball.y + (s1.ball.y - s0.ball.y) * frac;
                     }
@@ -3534,12 +3540,14 @@
                         gs.ball.x = __ballPredict.x;
                         gs.ball.y = __ballPredict.y;
                     } else if (now < __ballHandoffUntil) {
-                        const k = 1 - Math.exp(-dt / 72);
+                        const tau = __ballHandoffFast ? 42 : 70;
+                        const k = 1 - Math.exp(-dt / tau);
                         __ballVisX += (ballIx - __ballVisX) * k;
                         __ballVisY += (ballIy - __ballVisY) * k;
                         gs.ball.x = __ballVisX;
                         gs.ball.y = __ballVisY;
                     } else {
+                        __ballHandoffFast = false;
                         gs.ball.x = ballIx;
                         gs.ball.y = ballIy;
                         __ballVisX = ballIx;
@@ -3773,7 +3781,7 @@
             // Ball'u client-side predict modda başlat: süre RTT'ye göre dinamik
             // Hedef: server snapshot'larının "pas işlendi" state'i client'a ulaşana kadar predict
             // = RTT (input→server→broadcast→client) + küçük güvenlik payı
-            const startBallPredict = (defaultDuration) => {
+            const startBallPredict = (defaultDuration, opts = {}) => {
                 const rd = window.__rttDiag;
                 let rttEst = 150;
                 if (rd && rd.samples.length) {
@@ -3783,6 +3791,8 @@
                 const dur = Math.max(defaultDuration, Math.min(400, rttEst * 1.25 + 60));
                 __ballHandoffUntil = 0;
                 __ballPredict.active = true;
+                __ballPredict.fromPass = !!opts.fromPass;
+                if (opts.fromPass) __ballPassSnapUntil = performance.now() + 520;
                 __ballPredict.until = performance.now() + dur;
                 __ballPredict.x = b.x;
                 __ballPredict.y = b.y;
@@ -3812,7 +3822,7 @@
                     b.x = me.x + dx * (me.r + BALL_R + 2);
                     b.y = me.y + dy * (me.r + BALL_R + 2);
                     syncBallSnapshot();
-                    startBallPredict(250);
+                    startBallPredict(250, { fromPass: true });
                 }
             } else if (extra.action === 'pass_release') {
                 // Teknik şarjlı pas serbest bırakıldığında lokal fırlat
@@ -3832,7 +3842,7 @@
                     me.passCharging = false;
                     me.passChargeMs = 0;
                     syncBallSnapshot();
-                    startBallPredict(250);
+                    startBallPredict(250, { fromPass: true });
                 }
             } else if (extra.action === 'tackle') {
                 if (gs.penaltyMode || me.slideTimer > 0) return;
