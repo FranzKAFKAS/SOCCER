@@ -3040,9 +3040,9 @@
         const __PRED_SPEED = 3.2; // PLAYER_SPEED ile aynı
         // Interpolation: rakip + top için son 2 sunucu snapshot'ı arasında lerp
         // Sunucu 60Hz state yolluyor; ufak tampon paket gecikmelerini absorbe eder
-        // Sunucu broadcast 30Hz (her ~33ms snapshot) → 2 snapshot tampon için ~70ms uygun.
-        // Daha düşük olursa extrapolation devreye girer → opp jitter. Daha yüksek olursa input lag.
-        const __INTERP_DELAY_MS = 70;
+        // Network stddev=0.7ms (mükemmel) olduğunda 45ms yeterli:
+        // en kötü paket ~35ms, +10ms güvenlik payı → extrapolation riski yok, lag daha az.
+        const __INTERP_DELAY_MS = 45;
         let __snapshots = []; // [{t, players: {pid: {x,y,lastDirX,lastDirY}}, ball: {x,y,holder}}]
         // Input WS: her frame JSON atmak tamponu doldurup bufferedAmount ile drop edilince takılma yapıyordu
         let __inputSendSig = '';
@@ -3454,20 +3454,26 @@
                         }
                     }
 
-                    // Akıllı reconcile: küçük sapmayı yut, orta yumuşak düzelt, büyük snap.
+                    // ── RECONCILE ──────────────────────────────────────────────────────
+                    // Steady-state error matematiği:
+                    //   input → server round-trip ≈ 25ms → server 1.5 tick geride
+                    //   → beklenen steady-state error ≈ speed × 1.5 ≈ 4–5 px
+                    // Dead zone = 14px: bu aralıkta reconcile YAPMIYORUZ.
+                    //   → düz hareket sırasında reconcile prediction'ı geri çekmez → takıla yok.
+                    // 14–80px arası: hard collision, freeze, duvar sekmesi gibi gerçek düzeltmeler.
+                    //   → 400ms zaman sabitiyle yavaşça düzelt (görünmez geçiş).
+                    // 80px üstü: teleport/respawn → anında snap.
                     const errX = authX - __pred.x;
                     const errY = authY - __pred.y;
                     const errLen = Math.hypot(errX, errY);
                     if (errLen > 80) {
                         __pred.x = authX; __pred.y = authY;
-                    } else if (errLen > 3) {
-                        // 260ms zaman sabitli yumuşak düzelt (frame-rate bağımsız).
-                        // Daha uzun süre → daha az "geri çekme" hissi.
-                        const factor = Math.min(1, dt / 260);
+                    } else if (errLen > 14) {
+                        const factor = Math.min(1, dt / 400);
                         __pred.x += errX * factor;
                         __pred.y += errY * factor;
                     }
-                    // errLen <= 3: küçük titremeleri yut (no-op)
+                    // errLen ≤ 14: normal network latency kaynaklı steady-state drift → yut
 
                     // Slide aktifse pred pos'u slide velocity ile ilerlet
                     if (me.slideTimer > 0) {
