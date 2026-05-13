@@ -1,0 +1,3214 @@
+        let gameModeSize = 1;
+        function setGameMode(size) {
+            gameModeSize = size;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-mode-' + size).classList.add('active');
+            resizeGame();
+        }
+
+        // ─────────────── CANVAS & CONTEXT ───────────────
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let W = 900, H = 520;
+
+        // ─────────────── CONSTANTS ───────────────
+        const FIELD_MARGIN = 40;
+        const END_ZONE_W = 80;
+        let FIELD_LEFT, FIELD_RIGHT, FIELD_TOP, FIELD_BOTTOM, PLAY_LEFT, PLAY_RIGHT;
+
+        function updateFieldBounds() {
+            // Margin shrinks as player count increases, making the field "larger"
+            let marginX = 40, marginY = 40;
+            if (gameModeSize === 1) {
+                marginX = W * 0.15;
+                marginY = H * 0.15;
+            } else if (gameModeSize === 2) {
+                marginX = W * 0.08;
+                marginY = H * 0.08;
+            } else {
+                marginX = 40;
+                marginY = 40;
+            }
+
+            FIELD_LEFT = marginX;
+            FIELD_RIGHT = W - marginX;
+            FIELD_TOP = marginY;
+            FIELD_BOTTOM = H - marginY;
+            PLAY_LEFT = FIELD_LEFT + END_ZONE_W;
+            PLAY_RIGHT = FIELD_RIGHT - END_ZONE_W;
+        }
+        updateFieldBounds();
+
+
+
+        function resizeGame() {
+            const container = document.getElementById('canvas-container');
+            const rect = container.getBoundingClientRect();
+            W = Math.floor(rect.width) || window.innerWidth;
+            H = Math.floor(rect.height) || (window.innerHeight - 120);
+
+            canvas.width = W;
+            canvas.height = H;
+            updateFieldBounds();
+            if (!gameRunning) {
+                drawField();
+            }
+        }
+
+        const PLAYER_R = 18;
+        const BALL_R = 10;
+        const PLAYER_SPEED = 3.2;
+        const BALL_FRICTION = 0.93;
+        const THROW_SPEED = 7;
+        const THROW_SPEED_LOB = 5;
+        const SHOT_GOAL_H = 100;
+
+        // ─────────────── ABILITY DEFS ───────────────
+        const ALL_SKILLS = [
+            { id: 'clone', icon: '🧬', name: 'Klon', cd: 9000, duration: 5000, color: '#00d4ff' },
+            { id: 'slide', icon: '⚡', name: 'Kayma', cd: 5000, duration: 400, color: '#aa00ff' },
+            { id: 'power', icon: '💥', name: 'Güç', cd: 9000, duration: 2000, color: '#ffd700' },
+            { id: 'selfpass', icon: '🏃‍♂️', name: 'At-Kaçırt', cd: 8000, duration: 1200, color: '#00ffcc' },
+            { id: 'freeze', icon: '❄️', name: 'Dondur', cd: 7000, duration: 2000, color: '#88eeff' },
+            { id: 'reverse', icon: '🔀', name: 'Yön Tersle', cd: 8000, duration: 4000, color: '#ff88bb' },
+            { id: 'lob', icon: '🚀', name: 'Aşırtma', cd: 7000, duration: 0, color: '#ffaa00' },
+            { id: 'sloworb', icon: '🔮', name: 'Buz Küresi', cd: 9000, duration: 5000, color: '#33ffaa' },
+            { id: 'geopas', icon: '📐', name: 'Geom. Pas', cd: 7000, duration: 3000, color: '#ff9900' },
+            { id: 'speedboost', icon: '🏎️', name: 'Hız Boost', cd: 8000, duration: 1000, color: '#00ffff' },
+            { id: 'longpass', icon: '🏹', name: 'Uzun Pas', cd: 6000, duration: 0, color: '#ff66ff' },
+            { id: 'invisball', icon: '👻', name: 'Görünmez Top', cd: 10000, duration: 4000, color: '#aaa' },
+            { id: 'blind', icon: '🌑', name: 'Kör Etme', cd: 12000, duration: 3000, color: '#555' },
+            { id: 'shot', icon: '🎯', name: 'Şut', cd: 8000, duration: 5000, color: '#ff4400' },
+            { id: 'wall', icon: '🧱', name: 'Duvar', cd: 12000, duration: 7000, color: '#ff8800' },
+            { id: 'smoke', icon: '💨', name: 'Sis', cd: 11000, duration: 6000, color: '#ffffff' },
+            { id: 'hook', icon: '🪝', name: 'Halat', cd: 12000, duration: 800, color: '#ffaa33' },
+        ];
+
+        const PROFILES = [
+            { id: 'teknik', name: 'Teknik', icon: '🎯', color: '#00d4ff', skills: ['lob', 'geopas', 'speedboost'], slots: 3 },
+            { id: 'savasci', name: 'Savaşçı', icon: '⚔️', color: '#aa00ff', skills: ['slide', 'power', 'longpass'], slots: 3 },
+            { id: 'destek', name: 'Destek', icon: '🛡️', color: '#33ffaa', skills: ['reverse', 'sloworb', 'hook', 'freeze', 'invisball', 'wall', 'blind'], slots: 4 },
+            { id: 'ofansif', name: 'Ofansif', icon: '🔥', color: '#ff4400', skills: ['selfpass', 'smoke', 'clone', 'shot'], slots: 3 },
+        ];
+
+        let p1Profile = null, p2Profile = null;
+        let p1SelectedSkills = [];
+        let p2SelectedSkills = [];
+
+        // ─────────────── GAME STATE ───────────────
+        let gs = {};
+        let keys = {};
+        let particles = [];
+        let flashTimeout = null;
+        let animId = null;
+        let gameRunning = false;
+        let gameOver = false;
+
+        function initState() {
+            gs = {
+                score: [0, 0],
+                seconds: 0,
+                timerInterval: null,
+                tackleCooldown: 0,   // ms cooldown after a tackle to prevent instant re-steal
+                slowOrbProjectiles: [],
+                slowZones: [],
+                smokeProjectiles: [],
+                smokeZones: [],
+                freezeProjectile: null,
+                hookProjectile: null,
+                foulAttempts: { p1: 0, p2: 0 },  // failed tackle attempts per player
+                penaltyMode: null,  // null | { kicker: 'p1'|'p2', keeper: ..., goalX, goalY, active }
+                walls: [],          // [{ side, pos, owner, life }]
+
+                ball: {
+                    x: W / 2, y: H / 2,
+                    vx: 0, vy: 0,
+                    holder: null,         // null | 'p1' | 'p2'
+                    inAir: false,
+                    lobMode: false,
+                    lobProgress: 0,
+                    lobFrom: null, lobTo: null,
+                    frozenTimer: 0,
+                    shadow: 0,            // for lob arc
+                    longPassMode: false, longPassOwner: null,
+                    shotMode: false, shotOwner: null,
+                    teknikPassMode: false,
+                    invisTimer: 0,
+                },
+
+                players: {
+                    p1: {
+                        x: PLAY_LEFT + 60, y: H / 2,
+                        vx: 0, vy: 0,
+                        r: PLAYER_R,
+                        color: '#00d4ff',
+                        glow: '#00d4ff',
+                        facing: 1,
+                        frozenTimer: 0,
+                        poweredTimer: 0,
+                        slideTimer: 0,
+                        slideVx: 0, slideVy: 0,
+                        clones: [],
+                        controlsReversedTimer: 0,
+                        lobPending: false,
+                        lobCharging: false,
+                        lobChargeTimer: 0,
+                        slowOrbCharging: false,
+                        slowOrbChargeTimer: 0,
+                        smokeCharging: false,
+                        smokeChargeTimer: 0,
+                        growTimer: 0,
+                        shrinkTimer: 0,
+                        pullingTimer: 0,
+                        pulledBy: null,
+                        lastDirX: 1, lastDirY: 0,
+                        abilities: [],
+                        speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
+                        passCharging: false, passChargeMs: 0,
+                        longPassCharging: false, longPassChargeMs: 0,
+                    },
+                    p2: {
+                        x: PLAY_RIGHT - 60, y: H / 2,
+                        vx: 0, vy: 0,
+                        r: PLAYER_R,
+                        color: '#ff4d6d',
+                        glow: '#ff4d6d',
+                        facing: -1,
+                        frozenTimer: 0,
+                        poweredTimer: 0,
+                        slideTimer: 0,
+                        slideVx: 0, slideVy: 0,
+                        clones: [],
+                        controlsReversedTimer: 0,
+                        lobPending: false,
+                        lobCharging: false,
+                        lobChargeTimer: 0,
+                        slowOrbCharging: false,
+                        slowOrbChargeTimer: 0,
+                        smokeCharging: false,
+                        smokeChargeTimer: 0,
+                        growTimer: 0,
+                        shrinkTimer: 0,
+                        pullingTimer: 0,
+                        pulledBy: null,
+                        lastDirX: -1, lastDirY: 0,
+                        abilities: [],
+                        speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
+                        passCharging: false, passChargeMs: 0,
+                        longPassCharging: false, longPassChargeMs: 0,
+                    },
+                },
+            };
+
+            gs.players.p1.team = 'p1';
+            gs.players.p2.team = 'p2';
+            gs.blindTimer = 0;
+            gs.blindOwner = null;
+            gs.invisBallTimer = 0;
+
+            const yOffsets = gameModeSize === 2 ? [120] : (gameModeSize === 3 ? [120, -120] : []);
+            yOffsets.forEach((off, idx) => {
+                gs.players[`p1_bot${idx + 1}`] = {
+                    x: PLAY_LEFT + 60, y: H / 2 + off,
+                    vx: 0, vy: 0, r: PLAYER_R, color: '#00b4df', glow: '#00b4df', facing: 1,
+                    frozenTimer: 0, poweredTimer: 0, slideTimer: 0, slideVx: 0, slideVy: 0,
+                    clones: [], controlsReversedTimer: 0, lobPending: false, lobCharging: false,
+                    lobChargeTimer: 0, slowOrbCharging: false, slowOrbChargeTimer: 0, smokeCharging: false,
+                    smokeChargeTimer: 0, growTimer: 0, shrinkTimer: 0, pullingTimer: 0, pulledBy: null,
+                    lastDirX: 1, lastDirY: 0, abilities: [], team: 'p1', isBot: true,
+                    speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
+                    passCharging: false, passChargeMs: 0,
+                    longPassCharging: false, longPassChargeMs: 0,
+                };
+                gs.players[`p2_bot${idx + 1}`] = {
+                    x: PLAY_RIGHT - 60, y: H / 2 + off,
+                    vx: 0, vy: 0, r: PLAYER_R, color: '#df2d4d', glow: '#df2d4d', facing: -1,
+                    frozenTimer: 0, poweredTimer: 0, slideTimer: 0, slideVx: 0, slideVy: 0,
+                    clones: [], controlsReversedTimer: 0, lobPending: false, lobCharging: false,
+                    lobChargeTimer: 0, slowOrbCharging: false, slowOrbChargeTimer: 0, smokeCharging: false,
+                    smokeChargeTimer: 0, growTimer: 0, shrinkTimer: 0, pullingTimer: 0, pulledBy: null,
+                    lastDirX: -1, lastDirY: 0, abilities: [], team: 'p2', isBot: true,
+                    speedBoostTimer: 0, geopasActive: false, geopasTimer: 0, shotActiveTimer: 0,
+                    passCharging: false, passChargeMs: 0,
+                    longPassCharging: false, longPassChargeMs: 0,
+                };
+            });
+        }
+
+        // ─────────────── HUD BUILD ───────────────
+        // HUD DOM referansları + son durumları cache'le — her frame getElementById/className/style yazımını kes
+        let __hudRefs = null;
+        let __hudLast = null;
+        function buildHUD() {
+            __hudRefs = { p1: [], p2: [], score: [null, null] };
+            __hudLast = { p1: [], p2: [], score: ['', ''] };
+            ['p1', 'p2'].forEach(pid => {
+                const el = document.getElementById(`${pid}-abilities`);
+                el.innerHTML = '';
+                gs.players[pid].abilities.forEach((ab, i) => {
+                    const pip = document.createElement('div');
+                    pip.className = 'ability-pip';
+                    pip.innerHTML = `
+        <div class="ability-icon" id="${pid}-ab-${i}">
+          <span style="position:relative;z-index:1">${ab.icon}</span>
+          <div class="cooldown-fill" id="${pid}-ab-cd-${i}"></div>
+        </div>
+        <div class="ability-label">[${ab.key}]</div>
+      `;
+                    el.appendChild(pip);
+                    __hudRefs[pid].push({
+                        icon: pip.querySelector('.ability-icon'),
+                        fill: pip.querySelector('.cooldown-fill'),
+                    });
+                    __hudLast[pid].push({ pct: -1, cls: '' });
+                });
+            });
+            __hudRefs.score[0] = document.getElementById('score-p1');
+            __hudRefs.score[1] = document.getElementById('score-p2');
+        }
+
+        function updateHUD(dt) {
+            if (!__hudRefs) return;
+            for (const pid of ['p1', 'p2']) {
+                const abs = gs.players[pid].abilities;
+                const refs = __hudRefs[pid];
+                const last = __hudLast[pid];
+                for (let i = 0; i < abs.length; i++) {
+                    const ab = abs[i];
+                    const ref = refs[i];
+                    if (!ref) continue;
+                    const pct = ab.cdLeft > 0 ? (ab.cdLeft / ab.cd) * 100 : 0;
+                    const pctRounded = Math.round(pct);
+                    if (pctRounded !== last[i].pct) {
+                        ref.fill.style.height = pctRounded + '%';
+                        last[i].pct = pctRounded;
+                    }
+                    const cls = 'ability-icon' + (ab.cdLeft <= 0 ? ' ready' : '') + (ab.active ? ' active' : '');
+                    if (cls !== last[i].cls) {
+                        ref.icon.className = cls;
+                        last[i].cls = cls;
+                    }
+                }
+            }
+            const s0 = String(gs.score[0]);
+            const s1 = String(gs.score[1]);
+            if (s0 !== __hudLast.score[0]) { __hudRefs.score[0].textContent = s0; __hudLast.score[0] = s0; }
+            if (s1 !== __hudLast.score[1]) { __hudRefs.score[1].textContent = s1; __hudLast.score[1] = s1; }
+        }
+
+        // ─────────────── PARTICLE SYSTEM ───────────────
+        function spawnParticles(x, y, color, count = 12, speed = 3) {
+            for (let i = 0; i < count; i++) {
+                const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+                const s = speed * (0.5 + Math.random());
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * s,
+                    vy: Math.sin(angle) * s,
+                    life: 1,
+                    decay: 0.025 + Math.random() * 0.02,
+                    r: 3 + Math.random() * 3,
+                    color,
+                });
+            }
+        }
+
+        function updateParticles(dt) {
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vx *= 0.96;
+                p.vy *= 0.96;
+                p.life -= p.decay;
+                return p.life > 0;
+            });
+        }
+
+        function drawParticles() {
+            particles.forEach(p => {
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 6;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        // ─────────────── DEBUG EVENT LOGGER ───────────────
+        const gameEventDebug = {
+            enabled: true,
+            logger: null
+        };
+        window.gameEventDebug = gameEventDebug;
+        window.setGameEventLogger = function (fn) {
+            gameEventDebug.logger = typeof fn === 'function' ? fn : null;
+            console.log('[GAME_EVENT] custom logger', gameEventDebug.logger ? 'aktif' : 'kapali');
+        };
+        window.toggleGameEventLogs = function (enabled) {
+            gameEventDebug.enabled = !!enabled;
+            console.log('[GAME_EVENT] console logs', gameEventDebug.enabled ? 'aktif' : 'kapali');
+        };
+
+        function emitGameEvent(type, payload = {}) {
+            const evt = { type, ts: Date.now(), ...payload };
+            if (gameEventDebug.enabled) console.log('[GAME_EVENT]', evt);
+            if (typeof gameEventDebug.logger === 'function') {
+                try { gameEventDebug.logger(evt); }
+                catch (err) { console.warn('[GAME_EVENT] custom logger hata:', err); }
+            }
+        }
+
+        // ─────────────── FLASH MESSAGE ───────────────
+        function showFlash(msg, color = '#fff') {
+            const msgText = typeof msg === 'string' ? msg : String(msg ?? '');
+            emitGameEvent('flash', { msg: msgText, color });
+            if (msgText.includes('KAPTIRDI') || msgText.includes('ÇALDI')) {
+                emitGameEvent('ball_steal', { msg: msgText, color });
+            }
+            if (msgText.includes('FAUL')) {
+                emitGameEvent('foul', { msg: msgText, color });
+            }
+            const el = document.getElementById('flash-msg');
+            el.textContent = msgText;
+            el.style.color = color;
+            el.style.textShadow = `0 0 40px ${color}`;
+            el.style.transition = 'none';
+            el.style.opacity = '1';
+            el.style.transform = 'translate(-50%, -50%) scale(1)';
+            if (flashTimeout) clearTimeout(flashTimeout);
+            flashTimeout = setTimeout(() => {
+                el.style.transition = 'opacity 0.5s, transform 0.5s';
+                el.style.opacity = '0';
+                el.style.transform = 'translate(-50%, -50%) scale(1.3)';
+            }, 800);
+        }
+
+        // ─────────────── ABILITY USAGE ───────────────
+        function useAbility(pid, idx) {
+            const p = gs.players[pid];
+            const ab = p.abilities[idx];
+            if (!ab) return;
+
+            // Penaltı sırasında duvar yeteneği kullanılamaz
+            if (ab.id === 'wall' && gs.penaltyMode) {
+                if (p.wallPreview) p.wallPreview.active = false;
+                return;
+            }
+
+            // Wall: ön izleme aktifken her tuş 1/3'ü değiştirir (cooldown bypass)
+            if (ab.id === 'wall' && p.wallPreview && p.wallPreview.active) {
+                p.wallPreview.pos = (p.wallPreview.pos + 1) % 3;
+                p.wallPreview.holdMs = 0;
+                p.wallPreview.timeoutMs = 5000;
+                const labels = ['ÜST 1/3', 'ORTA 1/3', 'ALT 1/3'];
+                showFlash('🧱 ' + labels[p.wallPreview.pos], ab.color);
+                spawnParticles(p.x, p.y, ab.color, 6, 2);
+                return;
+            }
+
+            // Geopas: ikinci tuş yönlendirme (cooldown bypass)
+            if (ab.id === 'geopas' && p.geopasActive) {
+                p.geopasActive = false;
+                ab.active = false;
+                ab.cdLeft = ab.cd;
+                const b = gs.ball;
+                if (b.holder === null && !b.lobMode) {
+                    const bspeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+                    if (bspeed > 0.5) {
+                        const goalDir = pid === 'p1' ? 1 : -1;
+                        const r1vx = b.vy, r1vy = -b.vx;
+                        const r2vx = -b.vy, r2vy = b.vx;
+                        const useR1 = (r1vx * goalDir >= r2vx * goalDir);
+                        const nvx = useR1 ? r1vx : r2vx;
+                        const nvy = useR1 ? r1vy : r2vy;
+                        const nlen = Math.sqrt(nvx * nvx + nvy * nvy) || 1;
+                        // Yumuşak hız, bouncy (longPassMode)
+                        const geoSpeed = PASS_SPEED * 0.85;
+                        b.vx = (nvx / nlen) * geoSpeed;
+                        b.vy = (nvy / nlen) * geoSpeed;
+                        b.inAir = true;
+                        b.longPassMode = true;
+                        b.longPassOwner = pid;
+                        b.shotMode = false; b.shotOwner = null;
+                    }
+                }
+                spawnParticles(gs.ball.x, gs.ball.y, ab.color, 25, 7);
+                showFlash('📐 SAPTIRILDI!', ab.color);
+                return;
+            }
+
+            if (ab.cdLeft > 0 || p.frozenTimer > 0) return;
+
+            if (ab.id === 'clone') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const goUp = Math.random() < 0.5;
+                const realDY = goUp ? -72 : 72;
+                const cloneY = p.y + (goUp ? 72 : -72);
+                const oldY = p.y;
+                p.y = Math.max(FIELD_TOP + 15, Math.min(FIELD_BOTTOM - 15, p.y + realDY));
+                p.clones = [{ x: p.x, y: Math.max(FIELD_TOP + 15, Math.min(FIELD_BOTTOM - 15, cloneY)), life: ab.duration }];
+                spawnParticles(p.x, oldY, p.color, 20, 4);
+                spawnParticles(p.x, p.y, p.color, 10, 3);
+                spawnParticles(p.x, p.clones[0].y, p.color, 10, 3);
+                showFlash('🧬 KLON!', p.color);
+            }
+            else if (ab.id === 'slide') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const speed = 14;
+                let dx = 0, dy = 0;
+                if (pid === 'p1') {
+                    if (keys['KeyW']) dy = -1;
+                    if (keys['KeyS']) dy = 1;
+                    if (keys['KeyA']) dx = -1;
+                    if (keys['KeyD']) dx = 1;
+                } else {
+                    if (keys['ArrowUp']) dy = -1;
+                    if (keys['ArrowDown']) dy = 1;
+                    if (keys['ArrowLeft']) dx = -1;
+                    if (keys['ArrowRight']) dx = 1;
+                }
+                if (dx === 0 && dy === 0) { dx = p.lastDirX; dy = p.lastDirY; }
+                const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                p.slideVx = (dx / len) * speed;
+                p.slideVy = (dy / len) * speed;
+                p.slideTimer = ab.duration;
+                spawnParticles(p.x, p.y, ab.color, 15, 5);
+                showFlash('⚡ KAYMA!', ab.color);
+            }
+            else if (ab.id === 'power') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                p.poweredTimer = ab.duration;
+                spawnParticles(p.x, p.y, ab.color, 25, 6);
+                showFlash('💥 GÜÇ MODU!', ab.color);
+            }
+            else if (ab.id === 'selfpass') {
+                if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                executeSelfPass(pid);
+            }
+            else if (ab.id === 'freeze') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                gs.freezeProjectile = {
+                    x: p.x, y: p.y,
+                    vx: p.lastDirX * 9,
+                    vy: p.lastDirY * 9,
+                    life: 120,
+                    owner: pid
+                };
+                spawnParticles(p.x, p.y, ab.color, 15, 4);
+                showFlash('❄️ DONDUR!', ab.color);
+            }
+            else if (ab.id === 'reverse') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const opp = gs.players[pid === 'p1' ? 'p2' : 'p1'];
+                opp.controlsReversedTimer = ab.duration;
+                spawnParticles(p.x, p.y, ab.color, 18, 5);
+                showFlash('🔀 TERSLE!', ab.color);
+            }
+            else if (ab.id === 'hook') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                gs.hookProjectile = {
+                    x: p.x, y: p.y,
+                    vx: p.lastDirX * 20 + p.vx * 0.5,
+                    vy: p.lastDirY * 20 + p.vy * 0.5,
+                    owner: pid,
+                    life: 60
+                };
+                spawnParticles(p.x, p.y, ab.color, 15, 4);
+                showFlash('🪝 HALAT!', ab.color);
+            }
+            else if (ab.id === 'geopas') {
+                if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+                ab.active = true;
+                p.geopasActive = true;
+                p.geopasTimer = ab.duration;
+                const b = gs.ball;
+                b.holder = null;
+                b.inAir = true;
+                b.vx = p.lastDirX * PASS_SPEED;
+                b.vy = p.lastDirY * PASS_SPEED;
+                b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+                b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+                spawnParticles(b.x, b.y, ab.color, 15, 4);
+                showFlash('📐 GEOMETRİK PAS!', ab.color);
+            }
+            else if (ab.id === 'speedboost') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                p.speedBoostTimer = ab.duration;
+                spawnParticles(p.x, p.y, ab.color, 20, 6);
+                showFlash('🏎️ HIZ BOOST!', ab.color);
+            }
+            else if (ab.id === 'longpass') {
+                // Şarj akışı keydown'da startLongPassCharge ile başlatılır
+                startLongPassCharge(pid);
+            }
+            else if (ab.id === 'invisball') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                gs.invisBallTimer = ab.duration;
+                spawnParticles(p.x, p.y, '#aaa', 15, 3);
+                showFlash('👻 GÖRÜNMEZ TOP!', '#aaa');
+            }
+            else if (ab.id === 'blind') {
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                gs.blindTimer = ab.duration;
+                gs.blindOwner = pid;
+                spawnParticles(p.x, p.y, '#555', 20, 4);
+                showFlash('🌑 KÖR ETME!', '#ffffff');
+            }
+            else if (ab.id === 'shot') {
+                if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+                ab.active = true;
+                ab.cdLeft = ab.cd;
+                const b = gs.ball;
+                b.holder = null;
+                b.inAir = true;
+                const shotSpeed = PASS_SPEED * 1.6;
+                b.vx = p.lastDirX * shotSpeed;
+                b.vy = p.lastDirY * shotSpeed;
+                b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+                b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+                b.shotMode = true;
+                b.shotOwner = pid;
+                spawnParticles(b.x, b.y, ab.color, 25, 7);
+                showFlash('🎯 ŞUT!', ab.color);
+            }
+            else if (ab.id === 'wall') {
+                p.wallPreview = { active: true, pos: 0, holdMs: 0, timeoutMs: 5000 };
+                ab.active = true;
+                spawnParticles(p.x, p.y, ab.color, 10, 3);
+                showFlash('🧱 ÜST 1/3', ab.color);
+            }
+        }
+
+        function placeWall(pid) {
+            const p = gs.players[pid];
+            if (!p || !p.wallPreview || !p.wallPreview.active) return;
+            const ab = p.abilities.find(a => a.id === 'wall');
+            if (!ab) return;
+            const side = (p.team || pid) === 'p1' ? 'left' : 'right';
+            // Aynı sahibe ait önceki duvarı kaldır (tek duvar limit)
+            gs.walls = (gs.walls || []).filter(w => w.owner !== pid);
+            gs.walls.push({ side, pos: p.wallPreview.pos, owner: pid, life: ab.duration });
+            const wx = side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
+            spawnParticles(wx, H / 2, ab.color, 28, 6);
+            showFlash('🧱 DUVAR YERLEŞTİ!', ab.color);
+            ab.cdLeft = ab.cd;
+            ab.active = false;
+            p.wallPreview.active = false;
+        }
+
+        function executeSelfPass(pid) {
+            const p = gs.players[pid];
+            gs.ball.holder = null;
+            gs.ball.inAir = true;
+            const angle = 0.35;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            const kickX = p.lastDirX * cos - p.lastDirY * sin;
+            const kickY = p.lastDirX * sin + p.lastDirY * cos;
+            const SELF_PASS_SPEED = 9.5;
+            gs.ball.vx = kickX * SELF_PASS_SPEED;
+            gs.ball.vy = kickY * SELF_PASS_SPEED;
+            p.poweredTimer = Math.max(p.poweredTimer, 1200);
+            spawnParticles(p.x, p.y, '#00ffcc', 25, 6);
+            showFlash('🏃‍♂️ AT-KAÇIRT!', '#00ffcc');
+        }
+
+        // ─────────────── LOB PASS CHARGE ───────────────
+        function startLobCharge(pid) {
+            const p = gs.players[pid];
+            const ab = p.abilities.find(a => a.id === 'lob');
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+            p.passCharging = false;
+            p.passChargeMs = 0;
+            p.lobCharging = true;
+            p.lobChargeTimer = 0;
+        }
+
+        function executeLobPass(pid) {
+            const p = gs.players[pid];
+            if (!p.lobCharging) return;
+            p.lobCharging = false;
+            const ab = p.abilities.find(a => a.id === 'lob');
+
+            ab.active = true;
+            ab.cdLeft = ab.cd;
+
+            if (gs.ball.holder === pid) {
+                gs.ball.holder = null;
+                gs.ball.lobMode = true;
+                gs.ball.lobProgress = 0;
+                gs.ball.lobFrom = { x: p.x, y: p.y };
+
+                const ratio = Math.min(1, p.lobChargeTimer / LOB_MAX_CHARGE_MS);
+                const maxDist = W * 0.85;
+                const dist = 80 + ratio * maxDist;
+
+                gs.ball.lobTo = {
+                    x: Math.max(FIELD_LEFT, Math.min(FIELD_RIGHT, p.x + p.lastDirX * dist)),
+                    y: Math.max(FIELD_TOP, Math.min(FIELD_BOTTOM, p.y + p.lastDirY * dist)),
+                };
+                gs.ball.inAir = true;
+                spawnParticles(p.x, p.y, '#ffaa00', 20, 5);
+                showFlash('🚀 AŞIRTMA!', '#ffaa00');
+            }
+            p.lobChargeTimer = 0;
+        }
+
+        function startSlowOrbCharge(pid) {
+            const p = gs.players[pid];
+            const ab = p.abilities.find(a => a.id === 'sloworb');
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            p.slowOrbCharging = true;
+            p.slowOrbChargeTimer = 0;
+        }
+
+        function executeSlowOrb(pid) {
+            const p = gs.players[pid];
+            if (!p.slowOrbCharging) return;
+            p.slowOrbCharging = false;
+            const ab = p.abilities.find(a => a.id === 'sloworb');
+            if (ab) {
+                ab.cdLeft = ab.cd;
+                ab.active = true;
+                const ratio = Math.min(1, p.slowOrbChargeTimer / 1200);
+                const throwDist = 120 + ratio * 600;
+                const tx = Math.max(FIELD_LEFT, Math.min(FIELD_RIGHT, p.x + p.lastDirX * throwDist));
+                const ty = Math.max(FIELD_TOP, Math.min(FIELD_BOTTOM, p.y + p.lastDirY * throwDist));
+
+                gs.slowOrbProjectiles.push({
+                    x: p.x, y: p.y,
+                    startX: p.x, startY: p.y,
+                    targetX: tx, targetY: ty,
+                    progress: 0,
+                    owner: pid,
+                    duration: ab.duration
+                });
+                spawnParticles(p.x, p.y, ab.color, 15, 4);
+                showFlash('🔮 KÜRE FIRLATILDI!', ab.color);
+            }
+            p.slowOrbChargeTimer = 0;
+        }
+
+        function startSmokeCharge(pid) {
+            const p = gs.players[pid];
+            const ab = p.abilities.find(a => a.id === 'smoke');
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            p.smokeCharging = true;
+            p.smokeChargeTimer = 0;
+        }
+
+        const LONG_PASS_MAX_CHARGE_MS = 1200;
+        function startLongPassCharge(pid) {
+            const p = gs.players[pid];
+            const ab = p.abilities.find(a => a.id === 'longpass');
+            if (!ab || ab.cdLeft > 0 || p.frozenTimer > 0) return;
+            if (gs.ball.holder !== pid) { showFlash('Önce topu al!', '#888'); return; }
+            p.passCharging = false; p.passChargeMs = 0;
+            p.lobCharging = false; p.lobChargeTimer = 0;
+            p.longPassCharging = true;
+            p.longPassChargeMs = 0;
+            ab.active = true;
+            spawnParticles(p.x, p.y, ab.color, 6, 2);
+        }
+
+        function executeLongPass(pid) {
+            const p = gs.players[pid];
+            if (!p.longPassCharging) return;
+            p.longPassCharging = false;
+            const ab = p.abilities.find(a => a.id === 'longpass');
+            if (!ab) return;
+            if (gs.ball.holder !== pid) {
+                ab.active = false;
+                p.longPassChargeMs = 0;
+                return;
+            }
+            const ratio = Math.min(1, p.longPassChargeMs / LONG_PASS_MAX_CHARGE_MS);
+            p.longPassChargeMs = 0;
+            ab.cdLeft = ab.cd;
+            ab.active = true;
+            const b = gs.ball;
+            b.holder = null;
+            b.inAir = true;
+            b.longPassMode = true;
+            b.longPassOwner = pid;
+            const lpSpeed = PASS_SPEED * (1.0 + ratio * 1.5); // 1.0x → 2.5x
+            b.vx = p.lastDirX * lpSpeed;
+            b.vy = p.lastDirY * lpSpeed;
+            b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+            b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+            spawnParticles(b.x, b.y, ab.color, 20, 5);
+            showFlash(ratio > 0.7 ? '🏹 GÜÇLÜ UZUN PAS!' : '🏹 UZUN PAS!', ab.color);
+        }
+
+        function executeSmoke(pid) {
+            const p = gs.players[pid];
+            if (!p.smokeCharging) return;
+            p.smokeCharging = false;
+            const ab = p.abilities.find(a => a.id === 'smoke');
+            if (ab) {
+                ab.cdLeft = ab.cd;
+                ab.active = true;
+                const ratio = Math.min(1, p.smokeChargeTimer / 1200);
+                const throwDist = 120 + ratio * 600;
+                const tx = Math.max(FIELD_LEFT, Math.min(FIELD_RIGHT, p.x + p.lastDirX * throwDist));
+                const ty = Math.max(FIELD_TOP, Math.min(FIELD_BOTTOM, p.y + p.lastDirY * throwDist));
+
+                gs.smokeProjectiles.push({
+                    x: p.x, y: p.y,
+                    startX: p.x, startY: p.y,
+                    targetX: tx, targetY: ty,
+                    progress: 0,
+                    owner: pid,
+                    duration: ab.duration
+                });
+                spawnParticles(p.x, p.y, ab.color, 15, 4);
+                showFlash('💨 SİS BOMBASI!', ab.color);
+            }
+            p.smokeChargeTimer = 0;
+        }
+
+        // ─────────────── THROW BALL ───────────────
+        function throwBall(pid) {
+            const p = gs.players[pid];
+            const opp = gs.players[pid === 'p1' ? 'p2' : 'p1'];
+            if (gs.ball.holder !== pid) return;
+            p.passCharging = false;
+            p.passChargeMs = 0;
+            p.longPassCharging = false;
+            p.longPassChargeMs = 0;
+            gs.ball.holder = null;
+            gs.ball.inAir = true;
+            // throw toward opponent
+            const dx = opp.x - p.x;
+            const dy = opp.y - p.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            gs.ball.vx = (dx / len) * THROW_SPEED;
+            gs.ball.vy = (dy / len) * THROW_SPEED;
+            spawnParticles(gs.ball.x, gs.ball.y, '#ffee00', 10, 4);
+        }
+
+        function pickupBall(pid) {
+            const p = gs.players[pid];
+            const b = gs.ball;
+            if (b.holder !== null || b.lobMode || p.frozenTimer > 0) return;
+            const dx = p.x - b.x, dy = p.y - b.y;
+            if (Math.sqrt(dx * dx + dy * dy) < p.r + BALL_R + 4) {
+                b.holder = pid;
+                b.vx = 0; b.vy = 0;
+                b.inAir = false;
+                b.shotMode = false; b.shotOwner = null;
+                b.longPassMode = false; b.longPassOwner = null;
+                b.teknikPassMode = false;
+                spawnParticles(p.x, p.y, p.color, 8, 2);
+            }
+        }
+
+        function dropBall(pid) {
+            const p = gs.players[pid];
+            if (gs.ball.holder !== pid) return;
+            gs.ball.holder = null;
+            gs.ball.vx = p.lastDirX * 1.5;
+            gs.ball.vy = p.lastDirY * 1.5;
+        }
+
+        // ─────────────── TACKLE / FOUL SYSTEM ───────────────
+        const TACKLE_RANGE = 52;   // must be this close to attempt
+
+        function attemptTackle(pid) {
+            const b = gs.ball;
+            const p = gs.players[pid];
+            const oppPid = pid === 'p1' ? 'p2' : 'p1';
+            const opp = gs.players[oppPid];
+
+            if (p.frozenTimer > 0 || gs.penaltyMode) return;
+
+            // Distance to opponent and ball
+            const distToOpp = Math.hypot(opp.x - p.x, opp.y - p.y);
+            const distToBall = Math.hypot(b.x - p.x, b.y - p.y);
+
+            const isWarrior = p.profile && p.profile.id === 'savasci';
+
+            // PRIORITY 1: Interaction with Opponent (FOUL or STEAL)
+            if (distToOpp <= TACKLE_RANGE) {
+                if (b.holder === oppPid) {
+                    if (isWarrior) {
+                        // Savaşçı: her açıdan top çalar, faul olmaz
+                        b.holder = pid; b.vx = 0; b.vy = 0; b.inAir = false;
+                        gs.foulAttempts[pid] = 0;
+                        gs.tackleCooldown = 600;
+                        spawnParticles(p.x, p.y, '#aa00ff', 22, 6);
+                        showFlash('⚔️ SAVAŞÇI ÇALDI!', '#aa00ff');
+                        return;
+                    }
+                    // Ball IS held by opponent — shielding/steal logic
+                    const dBallX = b.x - p.x;
+                    const dBallY = b.y - p.y;
+                    const dBall = Math.sqrt(dBallX * dBallX + dBallY * dBallY);
+
+                    let carrierBlocking = false;
+                    if (dBall > 1) {
+                        const rayX = dBallX / dBall;
+                        const rayY = dBallY / dBall;
+                        const dOppX = opp.x - p.x;
+                        const dOppY = opp.y - p.y;
+                        const proj = dOppX * rayX + dOppY * rayY;
+                        if (proj > 0 && proj < dBall) {
+                            const cx = p.x + rayX * proj;
+                            const cy = p.y + rayY * proj;
+                            const perp = Math.hypot(cx - opp.x, cy - opp.y);
+                            if (perp < opp.r * 0.85) carrierBlocking = true;
+                        }
+                    }
+
+                    if (carrierBlocking) {
+                        gs.foulAttempts[pid]++;
+                        spawnParticles(p.x, p.y, '#ff4444', 10, 3);
+                        if (gs.foulAttempts[pid] >= 2) {
+                            gs.foulAttempts[pid] = 0;
+                            triggerFoul(pid, oppPid);
+                        } else {
+                            showFlash('🚨 VÜCUT FAULÜ! (' + gs.foulAttempts[pid] + '/2)', '#ff4444');
+                        }
+                    } else {
+                        // Success!
+                        b.holder = pid; b.vx = 0; b.vy = 0; b.inAir = false;
+                        gs.foulAttempts[pid] = 0;
+                        gs.tackleCooldown = 600;
+                        spawnParticles(p.x, p.y, p.color, 18, 5);
+                        showFlash('🏈 KAPTIRDI!', p.color);
+                    }
+                } else if (isWarrior) {
+                    // Savaşçı topsuz alanda da faul yapmaz, sadece etkisiz kalır
+                    spawnParticles(p.x, p.y, '#aa00ff', 6, 2);
+                } else {
+                    // Ball NOT held by opponent but you're tackling them — FOUL!
+                    gs.foulAttempts[pid]++;
+                    spawnParticles(p.x, p.y, '#ff4444', 10, 3);
+                    if (gs.foulAttempts[pid] >= 2) {
+                        gs.foulAttempts[pid] = 0;
+                        triggerFoul(pid, oppPid);
+                    } else {
+                        showFlash('🚨 TOPSUZ ALAN FAULÜ! (' + gs.foulAttempts[pid] + '/2)', '#ff4444');
+                    }
+                }
+                return;
+            }
+
+            // PRIORITY 2: Interaction with Free Ball (PICKUP)
+            if (b.holder === null && !b.lobMode && distToBall <= p.r + BALL_R + 10) {
+                pickupBall(pid);
+            }
+        }
+
+        function triggerFoul(foulerPid, victimPid) {
+            showFlash('🚨 FAUL! ' + (foulerPid === 'p1' ? 'Mavi' : 'Kırmızı') + ' faul yaptı!', '#ff4444');
+            gs.foulAttempts = { p1: 0, p2: 0 };
+            // Anında oyunu durdur (pending penaltı durumu) ve kısa bir geçişten sonra penaltı moduna gir
+            gs.penaltyMode = { pending: true, kicker: victimPid, keeper: foulerPid, active: false, shot: false };
+            const b = gs.ball;
+            // Topu durdur ve uçuş modlarını iptal et — geçiş sırasında hareket etmesin
+            if (b.holder === null) { b.vx = 0; b.vy = 0; b.inAir = false; }
+            b.longPassMode = false; b.longPassOwner = null;
+            b.shotMode = false; b.shotOwner = null;
+            b.teknikPassMode = false;
+            b.lobMode = false;
+            // Bekleyen şarjları temizle ki tuş bırakıldığında bir aksiyon tetiklenmesin
+            ['p1', 'p2'].forEach(pid => {
+                const pp = gs.players[pid];
+                if (!pp) return;
+                pp.passCharging = false;
+                pp.passChargeMs = 0;
+                pp.lobCharging = false;
+                pp.longPassCharging = false;
+                pp.slowOrbCharging = false;
+                pp.smokeCharging = false;
+                if (pp.wallPreview) pp.wallPreview.active = false;
+            });
+            setTimeout(() => startPenaltyMode(victimPid, foulerPid), 1200);
+        }
+
+        function startPenaltyMode(kickerPid, keeperPid) {
+            if (!gameRunning || gameOver) return;
+            const kicker = gs.players[kickerPid];
+
+            // Kicker stands in center, facing the fouler's end zone
+            kicker.x = W / 2;
+            kicker.y = H / 2;
+            kicker.lastDirX = keeperPid === 'p1' ? -1 : 1;
+            kicker.lastDirY = 0;
+
+            // Ball held by kicker
+            gs.ball.holder = kickerPid;
+            gs.ball.x = kicker.x + kicker.lastDirX * (kicker.r + BALL_R + 2);
+            gs.ball.y = kicker.y;
+            gs.ball.vx = 0; gs.ball.vy = 0;
+            gs.ball.inAir = false;
+
+            // Green zone: random position, ~13% wide
+            const greenStart = 0.12 + Math.random() * 0.65;
+
+            const goalX = keeperPid === 'p1' ? PLAY_LEFT : PLAY_RIGHT;
+            const goalY = H / 2;
+            const GOAL_H = SHOT_GOAL_H;
+
+            gs.penaltyMode = {
+                kicker: kickerPid,
+                keeper: keeperPid,       // fouler — speeds up the bar
+                goalX, goalY, goalH: GOAL_H,
+                barPos: 0,               // 0..1
+                barDir: 1,
+                baseSpeed: 0.0012,       // base speed
+                currentSpeed: 0.0012,
+                greenStart,
+                greenWidth: 0.13,
+                active: true,
+                shot: false,
+            };
+
+            // Penaltı süresince mevcut duvarları kaldır ve ön izlemeleri kapat
+            if (gs.walls && gs.walls.length) {
+                gs.walls.forEach(w => {
+                    const wx = w.side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
+                    spawnParticles(wx, H / 2, '#ff8800', 18, 4);
+                });
+                gs.walls = [];
+            }
+            ['p1', 'p2'].forEach(pp => {
+                const pl = gs.players[pp];
+                if (pl && pl.wallPreview) pl.wallPreview.active = false;
+            });
+
+            spawnParticles(W / 2, H / 2, '#ffaa00', 40, 8);
+            showFlash('🏈 PENALTİ BAR!', '#ffaa00');
+        }
+
+        function updatePenaltyBar(dt) {
+            const pm = gs.penaltyMode;
+            if (!pm || !pm.active || pm.shot) return;
+
+            // Rakibin (kalecinin) tackle/throw tuşu barı hızlandırır — klavye veya gamepad
+            const oppKey = pm.keeper === 'p1' ? 'KeyF' : 'KeyL';
+            let isHolding = !!keys[oppKey];
+            if (!isHolding) {
+                const gpIdx = pm.keeper === 'p1' ? 0 : 1;
+                const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+                const gp = gps[gpIdx];
+                if (gp && gp.connected) {
+                    // Button 2 (X/Square) = throw/tackle (pollGamepadActions ile uyumlu)
+                    isHolding = !!(gp.buttons[2] && gp.buttons[2].pressed);
+                }
+            }
+
+            const targetSpeed = isHolding ? pm.baseSpeed * 4 : pm.baseSpeed;
+            // Smoothly interpolate speed
+            pm.currentSpeed += (targetSpeed - pm.currentSpeed) * 0.1;
+
+            pm.barPos += pm.barDir * pm.currentSpeed * dt;
+            if (pm.barPos >= 1) { pm.barPos = 1; pm.barDir = -1; }
+            if (pm.barPos <= 0) { pm.barPos = 0; pm.barDir = 1; }
+        }
+
+        function shootPenalty(pid) {
+            const pm = gs.penaltyMode;
+            if (!pm || !pm.active || pm.shot) return;
+            if (pid !== pm.kicker) return;
+
+            pm.shot = true;
+            const inGreen = pm.barPos >= pm.greenStart && pm.barPos <= pm.greenStart + pm.greenWidth;
+
+            const b = gs.ball;
+            b.holder = null;
+            b.inAir = true;
+
+            // Direction towards goal
+            const dx = pm.goalX - b.x;
+            const dy = (inGreen ? pm.goalY : pm.goalY + (Math.random() > 0.5 ? 1 : -1) * (pm.goalH + 40)) - b.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            const shotSpeed = 18;
+            b.vx = (dx / dist) * shotSpeed;
+            b.vy = (dy / dist) * shotSpeed;
+
+            if (inGreen) {
+                showFlash('🎯 MÜKEMMEL VURUŞ!', '#00ff88');
+                spawnParticles(b.x, b.y, '#00ff88', 20, 5);
+            } else {
+                showFlash('💨 ISKALADI!', '#ff4444');
+                spawnParticles(b.x, b.y, '#ff4444', 15, 3);
+            }
+        }
+
+        function endPenaltyMode(scorerPid) {
+            if (!gs.penaltyMode) return;
+            const pm = gs.penaltyMode;
+            pm.active = false; // Stop bar updates and HUD
+
+            if (scorerPid) {
+                const idx = scorerPid === 'p1' ? 0 : 1;
+                gs.score[idx]++;
+                spawnParticles(W / 2, H / 2, scorerPid === 'p1' ? '#00d4ff' : '#ff4d6d', 60, 8);
+                showFlash(scorerPid === 'p1' ? '🔵 PENALTİ GOL! +1' : '🔴 PENALTİ GOL! +1', scorerPid === 'p1' ? '#00d4ff' : '#ff4d6d');
+                document.getElementById(`score-${scorerPid}`).textContent = gs.score[idx];
+                if (gs.score[idx] >= 5) { endGame(scorerPid); return; }
+            } else {
+                showFlash('❌ PENALTİ ISKALANDI!', '#888');
+            }
+
+            setTimeout(() => {
+                gs.penaltyMode = null;
+                resetRound();
+            }, 1200);
+        }
+
+        // ─────────────── INPUT ───────────────
+        const PASS_SPEED = 15; // px/frame for directional pass
+        const NON_TEKNIK_PASS_MULT = 0.72; // teknik olmayan sınıflar için kısaltılmış menzil
+        const TEKNIK_PASS_MAX_CHARGE_MS = 900;
+        const LOB_MAX_CHARGE_MS = 800; // aşırtma pas: kısa basışta daha fazla menzil
+
+        function playerIsTeknik(pid) {
+            const prof = gs.players[pid] && gs.players[pid].profile;
+            return prof && prof.id === 'teknik';
+        }
+
+        function directionalPass(pid) {
+            const p = gs.players[pid];
+            const b = gs.ball;
+            if (b.holder !== pid || p.frozenTimer > 0) return;
+
+            p.passCharging = false;
+            p.passChargeMs = 0;
+            b.holder = null;
+            b.inAir = true;
+            b.teknikPassMode = false;
+            const passMult = playerIsTeknik(pid) ? 1 : NON_TEKNIK_PASS_MULT;
+            b.vx = p.lastDirX * PASS_SPEED * passMult;
+            b.vy = p.lastDirY * PASS_SPEED * passMult;
+            // Spawn ball just outside the player's radius so auto-pickup can't immediately re-catch it
+            b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+            b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+            spawnParticles(b.x, b.y, pid === 'p1' ? '#00d4ff' : '#ff4d6d', 12, 4);
+            showFlash('🏈 PAS!', pid === 'p1' ? '#00d4ff' : '#ff4d6d');
+        }
+
+        function executeTeknikChargedPass(pid) {
+            const p = gs.players[pid];
+            const b = gs.ball;
+            if (!p.passCharging || b.holder !== pid || p.frozenTimer > 0) {
+                p.passCharging = false;
+                p.passChargeMs = 0;
+                return;
+            }
+            p.passCharging = false;
+            const charge = Math.min(TEKNIK_PASS_MAX_CHARGE_MS, p.passChargeMs);
+            p.passChargeMs = 0;
+            const t = charge / TEKNIK_PASS_MAX_CHARGE_MS;
+            const speedMult = 1 + t * 1.45;
+
+            b.holder = null;
+            b.inAir = true;
+            b.teknikPassMode = true;
+            b.longPassMode = false;
+            b.longPassOwner = null;
+            b.shotMode = false;
+            b.shotOwner = null;
+            b.vx = p.lastDirX * PASS_SPEED * speedMult;
+            b.vy = p.lastDirY * PASS_SPEED * speedMult;
+            b.x = p.x + p.lastDirX * (p.r + BALL_R + 2);
+            b.y = p.y + p.lastDirY * (p.r + BALL_R + 2);
+            spawnParticles(b.x, b.y, '#00e5ff', 18, 5);
+            showFlash(t > 0.55 ? '🎯 GÜÇLÜ PAS!' : '🎯 TEKNİK PAS!', '#00e5ff');
+        }
+
+        const actionMap = {
+            Space: () => {
+                if (gs.penaltyMode) {
+                    if (gs.penaltyMode.kicker === 'p1') shootPenalty('p1');
+                    else if (gs.penaltyMode.kicker === 'p2') shootPenalty('p2');
+                    return;
+                }
+                const h = gs.ball.holder;
+                if (h && playerIsTeknik(h)) {
+                    const hp = gs.players[h];
+                    hp.passCharging = true;
+                    hp.passChargeMs = 0;
+                    return;
+                }
+                if (gs.ball.holder === 'p1') directionalPass('p1');
+                else if (gs.ball.holder === 'p2') directionalPass('p2');
+            },
+            KeyF: () => {
+                if (gs.penaltyMode) return; // Speed boost handled by holding key
+                // Sadece top çalmak için — top bizdeyken hiçbir şey yapmasın
+                if (gs.ball.holder !== 'p1') attemptTackle('p1');
+            },
+            KeyL: () => {
+                if (gs.penaltyMode) return; // Speed boost handled by holding key
+                // Sadece top çalmak için — top bizdeyken hiçbir şey yapmasın
+                if (gs.ball.holder !== 'p2') attemptTackle('p2');
+            }
+        };
+
+        document.addEventListener('keydown', e => {
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                e.preventDefault();
+            }
+            if (keys[e.code]) return;
+            keys[e.code] = true;
+            if (gameRunning && !gameOver) {
+                if (actionMap[e.code]) {
+                    actionMap[e.code]();
+                } else {
+                    const p1AbIdx = gs.players.p1.abilities.findIndex(a => a.key === e.code);
+                    if (p1AbIdx !== -1) startAbilityByIdx('p1', p1AbIdx);
+                    const p2AbIdx = gs.players.p2.abilities.findIndex(a => a.key === e.code);
+                    if (p2AbIdx !== -1) startAbilityByIdx('p2', p2AbIdx);
+                }
+            }
+        });
+        document.addEventListener('keyup', e => {
+            keys[e.code] = false;
+            if (gameRunning && !gameOver && e.code === 'Space' && !gs.penaltyMode) {
+                if (gs.players.p1.passCharging && gs.ball.holder === 'p1') executeTeknikChargedPass('p1');
+                else if (gs.players.p2.passCharging && gs.ball.holder === 'p2') executeTeknikChargedPass('p2');
+            }
+            if (gameRunning && !gameOver) {
+                const p1Idx = gs.players.p1.abilities.findIndex(a => a.key === e.code);
+                if (p1Idx !== -1) releaseAbilityByIdx('p1', p1Idx);
+                const p2Idx = gs.players.p2.abilities.findIndex(a => a.key === e.code);
+                if (p2Idx !== -1) releaseAbilityByIdx('p2', p2Idx);
+            }
+        });
+
+        // ─────────────── HELPER: ABILITY PRESS/RELEASE ───────────────
+        function startAbilityByIdx(pid, idx) {
+            const ab = gs.players[pid] && gs.players[pid].abilities[idx];
+            if (!ab) return;
+            if (ab.id === 'lob') startLobCharge(pid);
+            else if (ab.id === 'sloworb') startSlowOrbCharge(pid);
+            else if (ab.id === 'smoke') startSmokeCharge(pid);
+            else if (ab.id === 'longpass') startLongPassCharge(pid);
+            else useAbility(pid, idx);
+        }
+        function releaseAbilityByIdx(pid, idx) {
+            const ab = gs.players[pid] && gs.players[pid].abilities[idx];
+            if (!ab) return;
+            const p = gs.players[pid];
+            if (ab.id === 'lob' && p.lobCharging) executeLobPass(pid);
+            if (ab.id === 'sloworb' && p.slowOrbCharging) executeSlowOrb(pid);
+            if (ab.id === 'smoke' && p.smokeCharging) executeSmoke(pid);
+            if (ab.id === 'longpass' && p.longPassCharging) executeLongPass(pid);
+        }
+
+        // ─────────────── GAMEPAD INPUT ───────────────
+        const gpPrevButtons = { p1: [], p2: [] };
+
+        // Klavye veya gamepad'de bir yetenek tuşunun basılı tutulup tutulmadığını kontrol eder
+        // Gamepad eşlemesi pollGamepadActions ile birebir aynı: idx 0→L1(4), 1→R1(5), 2→Y(3), 3→B(1)
+        const ABILITY_GAMEPAD_BUTTONS = [4, 5, 3, 1];
+        function isAbilityHeld(pid, ab) {
+            if (!ab) return false;
+            if (keys[ab.key]) return true;
+            const p = gs.players[pid];
+            if (!p) return false;
+            const abIdx = p.abilities.indexOf(ab);
+            if (abIdx < 0) return false;
+            const btnIdx = ABILITY_GAMEPAD_BUTTONS[abIdx];
+            if (btnIdx == null) return false;
+            const gpIdx = pid === 'p1' ? 0 : 1;
+            const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+            const gp = gps[gpIdx];
+            if (!gp || !gp.connected) return false;
+            return !!(gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed);
+        }
+
+        function pollGamepadActions() {
+            if (!gameRunning || gameOver) return;
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+
+            ['p1', 'p2'].forEach((pid, index) => {
+                const gp = gamepads[index];
+                if (!gp || !gp.connected) return;
+                const p = gs.players[pid];
+                if (!p) return;
+
+                const prev = gpPrevButtons[pid];
+                const pressed = (btnIdx) => gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed;
+                const justPressed = (btnIdx) => pressed(btnIdx) && !prev[btnIdx];
+                const justReleased = (btnIdx) => !pressed(btnIdx) && prev[btnIdx];
+
+                // Button 0 (A/Cross): Pass / Shoot Penalty
+                if (justPressed(0)) {
+                    if (gs.penaltyMode) {
+                        if (gs.penaltyMode.kicker === pid) shootPenalty(pid);
+                    } else if (gs.ball.holder === pid) {
+                        if (playerIsTeknik(pid)) {
+                            p.passCharging = true;
+                            p.passChargeMs = 0;
+                        } else {
+                            directionalPass(pid);
+                        }
+                    }
+                }
+                if (justReleased(0)) {
+                    if (!gs.penaltyMode && gs.ball.holder === pid && p.passCharging && playerIsTeknik(pid)) {
+                        executeTeknikChargedPass(pid);
+                    }
+                }
+
+                // Button 2 (X/Square): Tackle — top bizdeyken hiçbir şey yapmasın, sadece top çalmaya yarasın
+                if (justPressed(2)) {
+                    if (gs.ball.holder !== pid) attemptTackle(pid);
+                }
+
+                // Button 4 (L1/LB): Ability 1
+                if (justPressed(4)) startAbilityByIdx(pid, 0);
+                if (justReleased(4)) releaseAbilityByIdx(pid, 0);
+
+                // Button 5 (R1/RB): Ability 2
+                if (justPressed(5)) startAbilityByIdx(pid, 1);
+                if (justReleased(5)) releaseAbilityByIdx(pid, 1);
+
+                // Button 3 (Y/Triangle): Ability 3
+                if (justPressed(3)) startAbilityByIdx(pid, 2);
+                if (justReleased(3)) releaseAbilityByIdx(pid, 2);
+
+                // Button 1 (B/Circle): Ability 4 (Destek 4. skill için)
+                if (justPressed(1) && gs.players[pid].abilities[3]) startAbilityByIdx(pid, 3);
+                if (justReleased(1) && gs.players[pid].abilities[3]) releaseAbilityByIdx(pid, 3);
+
+                // Update prev states
+                for (let i = 0; i < gp.buttons.length; i++) {
+                    prev[i] = pressed(i);
+                }
+            });
+        }
+
+        // ─────────────── PHYSICS UPDATE ───────────────
+        function updatePlayer(pid, dt) {
+            const p = gs.players[pid];
+            const frameScale = Math.max(0.5, Math.min(3, dt / (1000 / 60)));
+
+            // cooldowns
+            p.abilities.forEach(ab => {
+                if (ab.cdLeft > 0) ab.cdLeft -= dt;
+                else { ab.cdLeft = 0; ab.active = false; }
+            });
+
+            if (p.frozenTimer > 0) {
+                p.frozenTimer -= dt;
+                return;
+            }
+
+            // No movement during penalty mode (also during the pending transition right after a foul)
+            if (gs.penaltyMode && (gs.penaltyMode.active || gs.penaltyMode.pending)) return;
+            if (p.pullingTimer > 0) {
+                p.pullingTimer -= dt;
+                const owner = gs.players[p.pulledBy];
+                if (owner) {
+                    const dx = owner.x - p.x;
+                    const dy = owner.y - p.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist > 30) {
+                        const pullSpeed = 0.35 * dt;
+                        p.vx = (dx / dist) * pullSpeed;
+                        p.vy = (dy / dist) * pullSpeed;
+                        p.x += p.vx;
+                        p.y += p.vy;
+                        clampPlayer(p);
+                        // Also update ball if held
+                        if (gs.ball.holder === pid) {
+                            gs.ball.x = p.x + p.lastDirX * (p.r * 0.7);
+                            gs.ball.y = p.y + p.lastDirY * (p.r * 0.7);
+                        }
+                    }
+                }
+                if (p.pullingTimer <= 0) p.pulledBy = null;
+                return;
+            }
+
+            // Reset radius to base
+            p.r = PLAYER_R;
+
+            // Speed boost decay
+            if (p.speedBoostTimer > 0) p.speedBoostTimer -= dt;
+
+            // Shot active decay
+            if (p.shotActiveTimer > 0) p.shotActiveTimer -= dt;
+
+            // Geopas second-press window
+            if (p.geopasActive && p.geopasTimer > 0) {
+                p.geopasTimer -= dt;
+                if (p.geopasTimer <= 0) {
+                    p.geopasActive = false;
+                    const gab = p.abilities.find(a => a.id === 'geopas');
+                    if (gab && gab.active) { gab.active = false; gab.cdLeft = gab.cd; }
+                }
+            }
+
+            // Wall: hold-to-place detection (klavye veya gamepad tuşu basılı tutulunca yerleşir)
+            if (p.wallPreview && p.wallPreview.active) {
+                const wAb = p.abilities.find(a => a.id === 'wall');
+                if (wAb) {
+                    p.wallPreview.timeoutMs -= dt;
+                    if (isAbilityHeld(pid, wAb)) {
+                        p.wallPreview.holdMs += dt;
+                        if (p.wallPreview.holdMs >= 380) {
+                            placeWall(pid);
+                        }
+                    } else {
+                        p.wallPreview.holdMs = 0;
+                    }
+                    if (p.wallPreview && p.wallPreview.active && p.wallPreview.timeoutMs <= 0) {
+                        p.wallPreview.active = false;
+                        wAb.active = false;
+                    }
+                }
+            }
+
+            // Teknik pas şarjı (Space veya gamepad A basılı kaldıkça menzil artar)
+            if (p.passCharging) {
+                if (gs.ball.holder !== pid || gs.penaltyMode || !playerIsTeknik(pid)) {
+                    p.passCharging = false;
+                    p.passChargeMs = 0;
+                } else {
+                    const gpIdx = pid === 'p1' ? 0 : 1;
+                    const gp = navigator.getGamepads ? navigator.getGamepads()[gpIdx] : null;
+                    const btnHeld = !!(gp && gp.buttons && gp.buttons[0] && gp.buttons[0].pressed);
+                    if (keys['Space'] || btnHeld) {
+                        p.passChargeMs = Math.min(TEKNIK_PASS_MAX_CHARGE_MS, p.passChargeMs + dt);
+                    }
+                }
+            }
+
+            // slide
+            if (p.slideTimer > 0) {
+                p.slideTimer -= dt;
+                p.x += p.slideVx * frameScale;
+                p.y += p.slideVy * frameScale;
+                p.slideVx *= 0.9;
+                p.slideVy *= 0.9;
+                clampPlayer(p);
+                if (gs.ball.holder === pid) {
+                    gs.ball.x = p.x + p.lastDirX * (p.r * 0.7);
+                    gs.ball.y = p.y + p.lastDirY * (p.r * 0.7);
+                }
+                return;
+            }
+
+            // normal movement
+            let dx = 0, dy = 0;
+
+            let inSlowZone = false;
+            gs.slowZones.forEach(z => {
+                if (Math.hypot(p.x - z.x, p.y - z.y) < z.radius) {
+                    inSlowZone = true;
+                    if (Math.random() < 0.1) spawnParticles(p.x, p.y + Math.random() * 20 - 10, '#33ffaa', 1, 2);
+                }
+            });
+            const zoneSlow = inSlowZone ? 0.35 : 1.0;
+
+            // Scale speed: bigger = slower, smaller = faster
+            const speedBoostMod = p.speedBoostTimer > 0 ? 1.9 : 1.0;
+            const isOfansif = p.profile && p.profile.id === 'ofansif';
+            const profileSpeedMod = isOfansif ? 1.1 : 1.0;
+            // Ofansif: top tutarken yavaşlamaz
+            const ballHoldMod = (gs.ball.holder === pid && !isOfansif) ? 0.8 : 1;
+            const speed = PLAYER_SPEED * ballHoldMod * (p.poweredTimer > 0 ? 1.4 : 1) * zoneSlow * speedBoostMod * profileSpeedMod;
+
+            // Gamepad input mapping
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            const gp = gamepads[pid === 'p1' ? 0 : 1];
+            let gpX = 0, gpY = 0;
+            let usingAnalog = false;
+
+            if (gp && gp.connected) {
+                if (Math.abs(gp.axes[0]) > 0.2) { gpX = gp.axes[0]; usingAnalog = true; }
+                if (Math.abs(gp.axes[1]) > 0.2) { gpY = gp.axes[1]; usingAnalog = true; }
+                if (gp.buttons[12] && gp.buttons[12].pressed) { gpY -= 1; usingAnalog = false; } // DPad Up
+                if (gp.buttons[13] && gp.buttons[13].pressed) { gpY += 1; usingAnalog = false; } // DPad Down
+                if (gp.buttons[14] && gp.buttons[14].pressed) { gpX -= 1; usingAnalog = false; } // DPad Left
+                if (gp.buttons[15] && gp.buttons[15].pressed) { gpX += 1; usingAnalog = false; } // DPad Right
+            }
+
+            if (pid === 'p1') {
+                if (keys['KeyW']) dy -= 1;
+                if (keys['KeyS']) dy += 1;
+                if (keys['KeyA']) dx -= 1;
+                if (keys['KeyD']) dx += 1;
+            } else {
+                if (keys['ArrowUp']) dy -= 1;
+                if (keys['ArrowDown']) dy += 1;
+                if (keys['ArrowLeft']) dx -= 1;
+                if (keys['ArrowRight']) dx += 1;
+            }
+
+            // Analog çubukla tam 360 derece hassasiyet, aksi halde D-Pad / Klavye toplanır
+            if (usingAnalog && dx === 0 && dy === 0) {
+                dx = gpX;
+                dy = gpY;
+            } else {
+                dx += gpX;
+                dy += gpY;
+            }
+
+            // Ters kontrol yeteneği etki ediyorsa yönleri tersle
+            if (p.controlsReversedTimer > 0) {
+                dx = -dx;
+                dy = -dy;
+                p.controlsReversedTimer -= dt;
+            }
+
+            // (p.facing kaldırıldı, yerine lastDirX/Y kullanılıyor)
+
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            if (dx !== 0 || dy !== 0) {
+                const moveStep = speed * frameScale;
+                p.x += (dx / len) * moveStep;
+                p.y += (dy / len) * moveStep;
+                p.lastDirX = dx / len;
+                p.lastDirY = dy / len;
+                // Move clones in perfect sync with real player
+                p.clones.forEach(c => {
+                    c.x += (dx / len) * moveStep;
+                    c.y += (dy / len) * moveStep;
+                    c.x = Math.max(FIELD_LEFT + PLAYER_R, Math.min(FIELD_RIGHT - PLAYER_R, c.x));
+                    c.y = Math.max(FIELD_TOP + PLAYER_R, Math.min(FIELD_BOTTOM - PLAYER_R, c.y));
+                });
+            }
+
+            // Clone lifetime decay
+            p.clones = p.clones.filter(c => { c.life -= dt; return c.life > 0; });
+
+            // power decay
+            if (p.poweredTimer > 0) p.poweredTimer -= dt;
+
+            // lob charging logic
+            if (p.lobCharging) {
+                p.lobChargeTimer += dt;
+                let tx = 99999, ty = 99999;
+                if (p.lastDirX < 0) tx = (p.x - FIELD_LEFT) / -p.lastDirX;
+                else if (p.lastDirX > 0) tx = (FIELD_RIGHT - p.x) / p.lastDirX;
+                if (p.lastDirY < 0) ty = (p.y - FIELD_TOP) / -p.lastDirY;
+                else if (p.lastDirY > 0) ty = (FIELD_BOTTOM - p.y) / p.lastDirY;
+                const distToEdge = Math.max(0, Math.min(tx, ty));
+                const rate = (W * 0.85) / LOB_MAX_CHARGE_MS;
+                let dynamicMaxTime = (distToEdge - 30) / rate;
+                dynamicMaxTime = Math.max(200, Math.min(LOB_MAX_CHARGE_MS, dynamicMaxTime));
+
+                if (p.lobChargeTimer > dynamicMaxTime) {
+                    p.lobCharging = false;
+                    p.lobChargeTimer = 0;
+                    const lobAb = p.abilities.find(a => a.id === 'lob');
+                    if (lobAb) lobAb.cdLeft = lobAb.cd;
+                    spawnParticles(p.x, p.y, '#555', 15, 3);
+                    showFlash('❌ ALAN BİTTİ!', '#888');
+                }
+            }
+
+            if (p.slowOrbCharging) {
+                p.slowOrbChargeTimer += dt;
+                let tx = 99999, ty = 99999;
+                if (p.lastDirX < 0) tx = (p.x - FIELD_LEFT) / -p.lastDirX;
+                else if (p.lastDirX > 0) tx = (FIELD_RIGHT - p.x) / p.lastDirX;
+                if (p.lastDirY < 0) ty = (p.y - FIELD_TOP) / -p.lastDirY;
+                else if (p.lastDirY > 0) ty = (FIELD_BOTTOM - p.y) / p.lastDirY;
+                const distToEdge = Math.max(0, Math.min(tx, ty));
+                const rate = (W * 0.85) / 1200;
+                let dynamicMaxTime = (distToEdge - 30) / rate;
+                dynamicMaxTime = Math.max(350, Math.min(1200, dynamicMaxTime));
+
+                if (p.slowOrbChargeTimer > dynamicMaxTime) {
+                    p.slowOrbCharging = false;
+                    p.slowOrbChargeTimer = 0;
+                    const orbAb = p.abilities.find(a => a.id === 'sloworb');
+                    if (orbAb) orbAb.cdLeft = orbAb.cd;
+                    spawnParticles(p.x, p.y, '#555', 15, 3);
+                    showFlash('❌ KÜRE BİTTİ!', '#888');
+                }
+            }
+
+            // Long pass charging
+            if (p.longPassCharging) {
+                if (gs.ball.holder !== pid || gs.penaltyMode) {
+                    // top kayboldu / penalty: şarjı iptal et, cooldown başlatma
+                    p.longPassCharging = false;
+                    p.longPassChargeMs = 0;
+                    const lpAb = p.abilities.find(a => a.id === 'longpass');
+                    if (lpAb) lpAb.active = false;
+                } else {
+                    p.longPassChargeMs = Math.min(LONG_PASS_MAX_CHARGE_MS, p.longPassChargeMs + dt);
+                    if (p.longPassChargeMs >= LONG_PASS_MAX_CHARGE_MS) {
+                        // maks tutulduysa otomatik fırlat
+                        executeLongPass(pid);
+                    }
+                }
+            }
+
+            if (p.smokeCharging) {
+                p.smokeChargeTimer += dt;
+                let tx = 99999, ty = 99999;
+                if (p.lastDirX < 0) tx = (p.x - FIELD_LEFT) / -p.lastDirX;
+                else if (p.lastDirX > 0) tx = (FIELD_RIGHT - p.x) / p.lastDirX;
+                if (p.lastDirY < 0) ty = (p.y - FIELD_TOP) / -p.lastDirY;
+                else if (p.lastDirY > 0) ty = (FIELD_BOTTOM - p.y) / p.lastDirY;
+                const distToEdge = Math.max(0, Math.min(tx, ty));
+                const rate = (W * 0.85) / 1200;
+                let dynamicMaxTime = (distToEdge - 30) / rate;
+                dynamicMaxTime = Math.max(350, Math.min(1200, dynamicMaxTime));
+
+                if (p.smokeChargeTimer > dynamicMaxTime) {
+                    p.smokeCharging = false;
+                    p.smokeChargeTimer = 0;
+                    const smokeAb = p.abilities.find(a => a.id === 'smoke');
+                    if (smokeAb) smokeAb.cdLeft = smokeAb.cd;
+                    spawnParticles(p.x, p.y, '#555', 15, 3);
+                    showFlash('❌ SİS BİTTİ!', '#888');
+                }
+            }
+
+            clampPlayer(p);
+
+            if (gs.ball.holder === pid) {
+                gs.ball.x = p.x + p.lastDirX * (p.r * 0.7);
+                gs.ball.y = p.y + p.lastDirY * (p.r * 0.7);
+            }
+        }
+
+        function clampPlayer(p) {
+            p.x = Math.max(FIELD_LEFT + p.r, Math.min(FIELD_RIGHT - p.r, p.x));
+            p.y = Math.max(FIELD_TOP + p.r, Math.min(FIELD_BOTTOM - p.r, p.y));
+        }
+
+        function updateBall(dt) {
+            const b = gs.ball;
+
+            // Faul → penaltı geçişi bekleniyor: top dursun
+            if (gs.penaltyMode && gs.penaltyMode.pending) return;
+
+            if (b.holder !== null) return;
+
+            if (b.lobMode) {
+                b.lobProgress += 0.018;
+                if (b.lobProgress >= 1) {
+                    b.lobProgress = 1;
+                    b.lobMode = false;
+                    b.x = b.lobTo.x;
+                    b.y = b.lobTo.y;
+                    b.vx = 0; b.vy = 0;
+                    b.inAir = false;
+                    spawnParticles(b.x, b.y, '#ffaa00', 15, 4);
+                } else {
+                    // Bezier arc
+                    const t = b.lobProgress;
+                    const mx = (b.lobFrom.x + b.lobTo.x) / 2;
+                    const my = Math.min(b.lobFrom.y, b.lobTo.y) - 120;
+                    b.x = (1 - t) * (1 - t) * b.lobFrom.x + 2 * (1 - t) * t * mx + t * t * b.lobTo.x;
+                    b.y = (1 - t) * (1 - t) * b.lobFrom.y + 2 * (1 - t) * t * my + t * t * b.lobTo.y;
+                }
+                return;
+            }
+
+            b.x += b.vx;
+            b.y += b.vy;
+
+            // No friction during penalty shot, long pass mode, or shot mode
+            if (!(gs.penaltyMode && gs.penaltyMode.shot) && !b.longPassMode && !b.shotMode) {
+                b.vx *= BALL_FRICTION;
+                b.vy *= BALL_FRICTION;
+            }
+
+            // wall bounce — elastic with 0.82 restitution for satisfying feel
+            // Skip bounce during penalty shot so ball can enter net area properly
+            if (!(gs.penaltyMode && gs.penaltyMode.shot)) {
+                const clearFastModes = () => {
+                    if (b.longPassMode) { b.longPassMode = false; b.longPassOwner = null; }
+                    if (b.shotMode) { b.shotMode = false; b.shotOwner = null; }
+                    if (b.teknikPassMode) b.teknikPassMode = false;
+                };
+                if (b.x - BALL_R < FIELD_LEFT) { b.x = FIELD_LEFT + BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
+                if (b.x + BALL_R > FIELD_RIGHT) { b.x = FIELD_RIGHT - BALL_R; b.vx *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
+                if (b.y - BALL_R < FIELD_TOP) { b.y = FIELD_TOP + BALL_R; b.vy *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
+                if (b.y + BALL_R > FIELD_BOTTOM) { b.y = FIELD_BOTTOM - BALL_R; b.vy *= -0.82; spawnParticles(b.x, b.y, '#ffee00', 5, 2); clearFastModes(); }
+            }
+
+            if (Math.abs(b.vx) < 0.1) b.vx = 0;
+            if (Math.abs(b.vy) < 0.1) b.vy = 0;
+        }
+
+        function checkCollisions(dt) {
+            const pKeys = Object.keys(gs.players);
+            const b = gs.ball;
+
+            // Tackle cooldown
+            if (gs.tackleCooldown > 0) gs.tackleCooldown -= dt;
+
+            // Player-player collision
+            for (let i = 0; i < pKeys.length; i++) {
+                for (let j = i + 1; j < pKeys.length; j++) {
+                    const p1 = gs.players[pKeys[i]];
+                    const p2 = gs.players[pKeys[j]];
+                    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = p1.r + p2.r;
+                    if (dist < minDist && dist > 0) {
+                        const nx = dx / dist, ny = dy / dist;
+                        const overlap = minDist - dist;
+
+                        p1.x -= nx * overlap * 0.5;
+                        p1.y -= ny * overlap * 0.5;
+                        p2.x += nx * overlap * 0.5;
+                        p2.y += ny * overlap * 0.5;
+
+                        if (gs.tackleCooldown <= 0 && p1.team !== p2.team) {
+                            if (p1.poweredTimer > 0 && b.holder === pKeys[j]) {
+                                b.holder = null; b.vx = nx * 6; b.vy = ny * 6; b.inAir = true;
+                                gs.tackleCooldown = 800;
+                                spawnParticles(p2.x, p2.y, '#ffd700', 20, 6);
+                                showFlash('🔥 YIKILDI!', '#ffd700');
+                            } else if (p2.poweredTimer > 0 && b.holder === pKeys[i]) {
+                                b.holder = null; b.vx = -nx * 6; b.vy = -ny * 6; b.inAir = true;
+                                gs.tackleCooldown = 800;
+                                spawnParticles(p1.x, p1.y, '#ffd700', 20, 6);
+                                showFlash('🔥 YIKILDI!', '#ffd700');
+                            }
+                            // Güç skilli: temasa sersemletme (donma'dan kısa süreli)
+                            const POWER_STUN_MS = 1000;
+                            if (p1.poweredTimer > 0 && p2.frozenTimer <= 0) {
+                                p2.frozenTimer = POWER_STUN_MS;
+                                if (b.holder === pKeys[j]) { b.holder = null; b.shotMode = false; b.shotOwner = null; b.vx = nx * 3; b.vy = ny * 3; b.inAir = true; }
+                                gs.tackleCooldown = 700;
+                                spawnParticles(p2.x, p2.y, '#ffd700', 12, 4);
+                                showFlash('🥴 SERSEM!', '#ffd700');
+                            } else if (p2.poweredTimer > 0 && p1.frozenTimer <= 0) {
+                                p1.frozenTimer = POWER_STUN_MS;
+                                if (b.holder === pKeys[i]) { b.holder = null; b.shotMode = false; b.shotOwner = null; b.vx = -nx * 3; b.vy = -ny * 3; b.inAir = true; }
+                                gs.tackleCooldown = 700;
+                                spawnParticles(p1.x, p1.y, '#ffd700', 12, 4);
+                                showFlash('🥴 SERSEM!', '#ffd700');
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Shot skill: ball must collide with players and briefly stun on hit.
+            if (b.shotMode && b.holder === null && !b.lobMode) {
+                const SHOT_STUN_MS = 700;
+                const ownerTeam = gs.players[b.shotOwner] ? gs.players[b.shotOwner].team : null;
+                for (const pid of pKeys) {
+                    const p = gs.players[pid];
+                    if (!p || p.frozenTimer > 0) continue;
+                    if (ownerTeam && p.team === ownerTeam) continue;
+                    const sx = b.x - p.x, sy = b.y - p.y;
+                    const hitDist = p.r + BALL_R;
+                    if (Math.sqrt(sx * sx + sy * sy) < hitDist) {
+                        p.frozenTimer = SHOT_STUN_MS;
+                        let nx = sx, ny = sy;
+                        const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
+                        nx /= nlen; ny /= nlen;
+                        const dot = b.vx * nx + b.vy * ny;
+                        b.vx = (b.vx - 2 * dot * nx) * 0.75;
+                        b.vy = (b.vy - 2 * dot * ny) * 0.75;
+                        b.x = p.x + nx * (hitDist + 1);
+                        b.y = p.y + ny * (hitDist + 1);
+                        b.shotMode = false; b.shotOwner = null;
+                        b.longPassMode = false; b.longPassOwner = null;
+                        b.teknikPassMode = false;
+                        b.inAir = true;
+                        spawnParticles(p.x, p.y, '#ff6600', 22, 5);
+                        showFlash('💥 ŞUT ÇARPTI! SERSEM!', '#ff6600');
+                        break;
+                    }
+                }
+            }
+
+            // Teknik şarjlı pas: ilk temas eden (donmamış) oyuncu topu yakalar — çok hızlı da olsa
+            if (b.teknikPassMode && b.holder === null && !b.lobMode) {
+                for (const pid of pKeys) {
+                    const pl = gs.players[pid];
+                    if (pl.frozenTimer > 0) continue;
+                    const pdx = b.x - pl.x, pdy = b.y - pl.y;
+                    if (Math.sqrt(pdx * pdx + pdy * pdy) < pl.r + BALL_R + 4) {
+                        b.holder = pid;
+                        b.vx = 0; b.vy = 0;
+                        b.inAir = false;
+                        b.teknikPassMode = false;
+                        b.shotMode = false; b.shotOwner = null;
+                        b.longPassMode = false; b.longPassOwner = null;
+                        spawnParticles(pl.x, pl.y, pl.color, 16, 4);
+                        showFlash('🎯 KONTROLLÜ PAS!', '#00e5ff');
+                        break;
+                    }
+                }
+            }
+
+            // Long pass ball-player collision
+            if (b.longPassMode) {
+                for (const pid of pKeys) {
+                    if (pid === b.longPassOwner) continue;
+                    const p = gs.players[pid];
+                    const ldx = b.x - p.x, ldy = b.y - p.y;
+                    const ldist = Math.sqrt(ldx * ldx + ldy * ldy);
+                    if (ldist < p.r + BALL_R + 4) {
+                        const ownerPlayer = gs.players[b.longPassOwner];
+                        if (ownerPlayer && ownerPlayer.team === p.team) {
+                            b.holder = pid; b.vx = 0; b.vy = 0; b.inAir = false;
+                            b.longPassMode = false; b.longPassOwner = null;
+                            b.shotMode = false; b.shotOwner = null;
+                            spawnParticles(p.x, p.y, p.color, 15, 4);
+                            showFlash('🏹 YAKALADIM!', p.color);
+                        } else {
+                            const lnx = ldist > 0 ? ldx / ldist : 1;
+                            const lny = ldist > 0 ? ldy / ldist : 0;
+                            const bspd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+                            b.vx = lnx * bspd * 0.75; b.vy = lny * bspd * 0.75;
+                            b.longPassMode = false; b.longPassOwner = null;
+                            spawnParticles(p.x, p.y, '#ff66ff', 15, 5);
+                            showFlash('🏹 ENGELLENDİ!', '#ff66ff');
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Auto-pickup: only when ball is free AND nearly stationary (prevents catching a thrown/passed ball)
+            const ballSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+            if (ballSpeed < 2) {
+                pKeys.forEach(pid => {
+                    const p = gs.players[pid];
+                    if (b.holder === null && !b.lobMode && p.frozenTimer <= 0) {
+                        const bx = b.x - p.x, by = b.y - p.y;
+                        if (Math.sqrt(bx * bx + by * by) < p.r + BALL_R) {
+                            b.holder = pid;
+                            b.vx = 0; b.vy = 0;
+                            b.inAir = false;
+                            b.shotMode = false; b.shotOwner = null;
+                            b.longPassMode = false; b.longPassOwner = null;
+                            b.teknikPassMode = false;
+                            spawnParticles(p.x, p.y, p.color, 6, 2);
+                        }
+                    }
+                });
+            }
+
+            // Freeze projectile
+            if (gs.freezeProjectile) {
+                const fp = gs.freezeProjectile;
+                fp.x += fp.vx;
+                fp.y += fp.vy;
+                fp.life--;
+
+                const ownerTeam = gs.players[fp.owner] ? gs.players[fp.owner].team : null;
+                let hitTarget = null;
+                for (const pid of pKeys) {
+                    const target = gs.players[pid];
+                    if (target.team !== ownerTeam) {
+                        const fdx = fp.x - target.x, fdy = fp.y - target.y;
+                        if (Math.sqrt(fdx * fdx + fdy * fdy) < target.r + 6) {
+                            hitTarget = pid;
+                            break;
+                        }
+                    }
+                }
+
+                if (hitTarget) {
+                    const target = gs.players[hitTarget];
+                    target.frozenTimer = 2000;
+                    if (gs.ball.holder === hitTarget) {
+                        gs.ball.holder = null;
+                        gs.ball.vx = target.team === 'p1' ? -2 : 2; gs.ball.vy = 0;
+                    }
+                    spawnParticles(target.x, target.y, '#88eeff', 25, 5);
+                    showFlash('🧊 DONDU!', '#88eeff');
+                    gs.freezeProjectile = null;
+                } else if (fp.life <= 0 || fp.x < FIELD_LEFT || fp.x > FIELD_RIGHT || fp.y < FIELD_TOP || fp.y > FIELD_BOTTOM) {
+                    gs.freezeProjectile = null;
+                }
+            }
+
+            // Hook projectile
+            if (gs.hookProjectile) {
+                const hp = gs.hookProjectile;
+                hp.x += hp.vx;
+                hp.y += hp.vy;
+                hp.life--;
+
+                const ownerTeam = gs.players[hp.owner] ? gs.players[hp.owner].team : null;
+                let hitTarget = null;
+                for (const pid of pKeys) {
+                    const target = gs.players[pid];
+                    if (target.team !== ownerTeam) {
+                        const hdx = hp.x - target.x, hdy = hp.y - target.y;
+                        if (Math.sqrt(hdx * hdx + hdy * hdy) < target.r + 6) {
+                            hitTarget = pid;
+                            break;
+                        }
+                    }
+                }
+
+                if (hitTarget) {
+                    const target = gs.players[hitTarget];
+                    const owner = gs.players[hp.owner];
+                    target.pullingTimer = 800; // Skill duration
+                    target.pulledBy = hp.owner;
+                    if (gs.ball.holder === hitTarget) {
+                        gs.ball.holder = null;
+                        gs.ball.vx = (owner.x - target.x) * 0.05;
+                        gs.ball.vy = (owner.y - target.y) * 0.05;
+                    }
+                    spawnParticles(target.x, target.y, '#ffaa33', 20, 5);
+                    showFlash('🪝 YAKALANDI!', '#ffaa33');
+                    gs.hookProjectile = null;
+                } else if (hp.life <= 0 || hp.x < FIELD_LEFT || hp.x > FIELD_RIGHT || hp.y < FIELD_TOP || hp.y > FIELD_BOTTOM) {
+                    gs.hookProjectile = null;
+                }
+            }
+
+            // Update slow orbs
+            for (let i = gs.slowOrbProjectiles.length - 1; i >= 0; i--) {
+                const orb = gs.slowOrbProjectiles[i];
+                orb.progress += 0.025;
+                if (orb.progress >= 1) {
+                    gs.slowZones.push({
+                        x: orb.targetX, y: orb.targetY,
+                        radius: 110, life: orb.duration, owner: orb.owner
+                    });
+                    spawnParticles(orb.targetX, orb.targetY, '#33ffaa', 30, 6);
+                    showFlash('🔮 ALAN OLUŞTU!', '#33ffaa');
+                    gs.slowOrbProjectiles.splice(i, 1);
+                } else {
+                    const t = orb.progress;
+                    const mx = (orb.startX + orb.targetX) / 2;
+                    const my = Math.min(orb.startY, orb.targetY) - 150;
+                    orb.x = (1 - t) * (1 - t) * orb.startX + 2 * (1 - t) * t * mx + t * t * orb.targetX;
+                    orb.y = (1 - t) * (1 - t) * orb.startY + 2 * (1 - t) * t * my + t * t * orb.targetY;
+                }
+            }
+
+            // Update slow zones
+            gs.slowZones = gs.slowZones.filter(z => { z.life -= dt; return z.life > 0; });
+
+            // Update smoke orbs
+            for (let i = gs.smokeProjectiles.length - 1; i >= 0; i--) {
+                const orb = gs.smokeProjectiles[i];
+                orb.progress += 0.022; // slightly different speed
+                if (orb.progress >= 1) {
+                    gs.smokeZones.push({
+                        x: orb.targetX, y: orb.targetY,
+                        radius: 145, life: orb.duration, owner: orb.owner
+                    });
+                    spawnParticles(orb.targetX, orb.targetY, '#fff', 30, 8);
+                    gs.smokeProjectiles.splice(i, 1);
+                } else {
+                    const t = orb.progress;
+                    orb.x = orb.startX + (orb.targetX - orb.startX) * t;
+                    orb.y = orb.startY + (orb.targetY - orb.startY) * t;
+                }
+            }
+            // Update smoke zones
+            gs.smokeZones = gs.smokeZones.filter(z => { z.life -= dt; return z.life > 0; });
+
+            // Ball hits clone -> Teleportation (Substitution Jutsu)
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                const opp = gs.players[pid === 'p1' ? 'p2' : 'p1'];
+                if (b.holder === null && !b.lobMode && p.clones.length > 0 && p.frozenTimer <= 0) {
+                    for (let i = 0; i < p.clones.length; i++) {
+                        const c = p.clones[i];
+                        const distX = b.x - c.x;
+                        const distY = b.y - c.y;
+                        if (Math.sqrt(distX * distX + distY * distY) < p.r + BALL_R + 8) {
+                            // Swap Player and the Clone
+                            const oldX = p.x;
+                            const oldY = p.y;
+                            p.x = c.x;
+                            p.y = c.y;
+                            c.x = oldX;
+                            c.y = oldY;
+
+                            // Player catches the ball
+                            b.holder = pid;
+                            b.vx = 0;
+                            b.vy = 0;
+                            b.inAir = false;
+
+                            spawnParticles(p.x, p.y, '#ffffff', 40, 8);
+                            showFlash('💫 YER DEĞİŞTİRME!', p.color);
+                            break;
+                        }
+                    }
+                }
+
+                // Clone vs Opponent collision — pop fake clone on touch
+                p.clones = p.clones.filter(c => {
+                    const cdx = opp.x - c.x, cdy = opp.y - c.y;
+                    if (Math.sqrt(cdx * cdx + cdy * cdy) < p.r + opp.r + 2) {
+                        spawnParticles(c.x, c.y, p.color, 18, 5);
+                        showFlash('👻 HAYALET!', p.color);
+                        return false;
+                    }
+                    return true;
+                });
+            });
+        }
+
+        function checkGoal() {
+            const b = gs.ball;
+
+            // Penalty mode: detect if shot entered the goal
+            if (gs.penaltyMode && gs.penaltyMode.shot && gs.penaltyMode.active) {
+                const pm = gs.penaltyMode;
+                // If ball crossed the goal line
+                const crossed = pm.keeper === 'p1' ? (b.x < pm.goalX) : (b.x > pm.goalX);
+                if (crossed) {
+                    const hit = Math.abs(b.y - pm.goalY) < pm.goalH / 2;
+                    if (hit) {
+                        endPenaltyMode(pm.kicker);
+                    } else {
+                        endPenaltyMode(null);
+                    }
+                    return;
+                }
+                // If ball went out of bounds or stopped
+                if (b.x < FIELD_LEFT || b.x > FIELD_RIGHT || b.y < FIELD_TOP || b.y > FIELD_BOTTOM || (Math.abs(b.vx) < 0.5 && Math.abs(b.vy) < 0.5)) {
+                    endPenaltyMode(null);
+                    return;
+                }
+                return;
+            }
+            if (gs.penaltyMode) return;
+
+            // SAYIM KURALI: sadece topla birlikte end zone'a giren oyuncu sayı yapabilir
+            let scorer = null;
+
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                if (b.holder === pid) {
+                    if (pid === 'p1' && p.x > PLAY_RIGHT) {
+                        const wblock = (gs.walls || []).find(w => w.side === 'right' && yInWallSegment(p.y, w.pos));
+                        if (wblock) {
+                            p.x = PLAY_RIGHT - p.r - 2;
+                            wblock.life = Math.max(0, wblock.life - 500);
+                            spawnParticles(p.x, p.y, '#ff8800', 12, 4);
+                        } else {
+                            scorer = 'p1';
+                        }
+                    }
+                    if (pid === 'p2' && p.x < PLAY_LEFT) {
+                        const wblock = (gs.walls || []).find(w => w.side === 'left' && yInWallSegment(p.y, w.pos));
+                        if (wblock) {
+                            p.x = PLAY_LEFT + p.r + 2;
+                            wblock.life = Math.max(0, wblock.life - 500);
+                            spawnParticles(p.x, p.y, '#ff8800', 12, 4);
+                        } else {
+                            scorer = 'p2';
+                        }
+                    }
+                }
+            });
+
+            // Şut modu: küçük kaleye girerse gol, ıskalarsa gol çizgisinden seker
+            if (b.shotMode && b.shotOwner && b.holder === null && !b.lobMode) {
+                const goalTopY = H / 2 - SHOT_GOAL_H / 2;
+                const goalBotY = H / 2 + SHOT_GOAL_H / 2;
+                const inGoalY = b.y > goalTopY && b.y < goalBotY;
+                if (b.shotOwner === 'p1' && b.x + BALL_R > PLAY_RIGHT) {
+                    if (inGoalY) {
+                        const blocker = (gs.walls || []).find(w => w.side === 'right' && yInWallSegment(b.y, w.pos));
+                        if (blocker) {
+                            b.x = PLAY_RIGHT - BALL_R - 4; b.vx = -Math.abs(b.vx) * 0.85;
+                            b.shotMode = false; b.shotOwner = null;
+                            blocker.life = Math.max(0, blocker.life - 1500);
+                            spawnParticles(b.x, b.y, '#ff8800', 22, 6);
+                            showFlash('🛡️ DUVAR ENGELLEDİ!', '#ff8800');
+                        } else {
+                            scorer = 'p1';
+                        }
+                    } else {
+                        b.x = PLAY_RIGHT - BALL_R; b.vx = -Math.abs(b.vx) * 0.75;
+                        b.shotMode = false; b.shotOwner = null;
+                        spawnParticles(b.x, b.y, '#ff4444', 14, 4);
+                        showFlash('💨 ISKA!', '#ff4444');
+                    }
+                } else if (b.shotOwner === 'p2' && b.x - BALL_R < PLAY_LEFT) {
+                    if (inGoalY) {
+                        const blocker = (gs.walls || []).find(w => w.side === 'left' && yInWallSegment(b.y, w.pos));
+                        if (blocker) {
+                            b.x = PLAY_LEFT + BALL_R + 4; b.vx = Math.abs(b.vx) * 0.85;
+                            b.shotMode = false; b.shotOwner = null;
+                            blocker.life = Math.max(0, blocker.life - 1500);
+                            spawnParticles(b.x, b.y, '#ff8800', 22, 6);
+                            showFlash('🛡️ DUVAR ENGELLEDİ!', '#ff8800');
+                        } else {
+                            scorer = 'p2';
+                        }
+                    } else {
+                        b.x = PLAY_LEFT + BALL_R; b.vx = Math.abs(b.vx) * 0.75;
+                        b.shotMode = false; b.shotOwner = null;
+                        spawnParticles(b.x, b.y, '#ff4444', 14, 4);
+                        showFlash('💨 ISKA!', '#ff4444');
+                    }
+                }
+            }
+
+            // Serbest top end zone çizgisine girerse geri sektirilir (şut modu yoksa)
+            if (b.holder === null && !b.lobMode && !b.shotMode) {
+                if (b.x - BALL_R < PLAY_LEFT) {
+                    b.x = PLAY_LEFT + BALL_R; b.vx = Math.abs(b.vx) * 0.75;
+                    if (b.longPassMode) { b.longPassMode = false; b.longPassOwner = null; }
+                }
+                if (b.x + BALL_R > PLAY_RIGHT) {
+                    b.x = PLAY_RIGHT - BALL_R; b.vx = -Math.abs(b.vx) * 0.75;
+                    if (b.longPassMode) { b.longPassMode = false; b.longPassOwner = null; }
+                }
+            }
+
+            if (scorer) {
+                const idx = scorer === 'p1' ? 0 : 1;
+                gs.score[idx]++;
+                spawnParticles(W / 2, H / 2, scorer === 'p1' ? '#00d4ff' : '#ff4d6d', 60, 8);
+                showFlash(scorer === 'p1' ? '🔵 GOL! +1' : '🔴 GOL! +1', scorer === 'p1' ? '#00d4ff' : '#ff4d6d');
+                document.getElementById(`score-${scorer}`).textContent = gs.score[idx];
+
+                if (gs.score[idx] >= 5) {
+                    endGame(scorer);
+                    return;
+                }
+                resetRound();
+            }
+        }
+
+        function resetRound() {
+            const b = gs.ball;
+            b.x = W / 2; b.y = H / 2;
+            b.vx = 0; b.vy = 0;
+            b.holder = null;
+            b.inAir = false;
+            b.lobMode = false;
+            b.frozenTimer = 0;
+            b.longPassMode = false; b.longPassOwner = null;
+            b.shotMode = false; b.shotOwner = null;
+            b.teknikPassMode = false;
+            b.invisTimer = 0;
+
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                p.x = pid === 'p1' ? PLAY_LEFT + 60 : PLAY_RIGHT - 60;
+                p.y = H / 2;
+                p.frozenTimer = 0;
+                p.poweredTimer = 0;
+                p.slideTimer = 0;
+                p.selfPassCdLeft = 0;
+                p.lobCharging = false;
+                p.lobChargeTimer = 0;
+                p.slowOrbCharging = false;
+                p.slowOrbChargeTimer = 0;
+                p.smokeCharging = false;
+                p.smokeChargeTimer = 0;
+                p.growTimer = 0;
+                p.shrinkTimer = 0;
+                p.pullingTimer = 0;
+                p.pulledBy = null;
+                p.r = PLAYER_R;
+                p.clones = [];
+                p.controlsReversedTimer = 0;
+                p.speedBoostTimer = 0;
+                p.geopasActive = false;
+                p.geopasTimer = 0;
+                p.shotActiveTimer = 0;
+                p.passCharging = false;
+                p.passChargeMs = 0;
+                p.longPassCharging = false;
+                p.longPassChargeMs = 0;
+                if (p.wallPreview) p.wallPreview.active = false;
+            });
+
+            gs.freezeProjectile = null;
+            gs.hookProjectile = null;
+            gs.slowOrbProjectiles = [];
+            gs.slowZones = [];
+            gs.smokeProjectiles = [];
+            gs.smokeZones = [];
+            gs.foulAttempts = { p1: 0, p2: 0 };
+            gs.penaltyMode = null;
+            gs.blindTimer = 0;
+            gs.blindOwner = null;
+            gs.invisBallTimer = 0;
+            gs.walls = [];
+        }
+
+        function endGame(winner) {
+            gameOver = true;
+            gameRunning = false;
+            clearInterval(gs.timerInterval);
+
+            setTimeout(() => {
+                const overlay = document.getElementById('overlay');
+                const h2 = overlay.querySelector('h2');
+                const sub = overlay.querySelector('.subtitle');
+                const btn = document.getElementById('start-btn');
+                h2.textContent = winner === 'p1' ? '🔵 OYUNCU 1 KAZANDI!' : '🔴 OYUNCU 2 KAZANDI!';
+                h2.style.color = winner === 'p1' ? '#00d4ff' : '#ff4d6d';
+                sub.textContent = `Skor: ${gs.score[0]} — ${gs.score[1]}`;
+                btn.textContent = 'YENİDEN OYNA';
+                overlay.classList.remove('hidden');
+            }, 1200);
+        }
+
+        // ─────────────── DRAW ───────────────
+        function drawField() {
+            // Background
+            ctx.fillStyle = '#0d1f12';
+            ctx.fillRect(0, 0, W, H);
+
+            // Field
+            const grad = ctx.createLinearGradient(FIELD_LEFT, 0, FIELD_RIGHT, 0);
+            grad.addColorStop(0, '#0d2818');
+            grad.addColorStop(0.5, '#0f3318');
+            grad.addColorStop(1, '#0d2818');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.roundRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, 12);
+            ctx.fill();
+
+            // Yard lines
+            ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+            ctx.lineWidth = 1;
+            for (let x = PLAY_LEFT + 60; x < PLAY_RIGHT; x += 60) {
+                ctx.beginPath();
+                ctx.moveTo(x, FIELD_TOP);
+                ctx.lineTo(x, FIELD_BOTTOM);
+                ctx.stroke();
+            }
+
+            // Center line
+            ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 8]);
+            ctx.beginPath();
+            ctx.moveTo(W / 2, FIELD_TOP);
+            ctx.lineTo(W / 2, FIELD_BOTTOM);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Center circle
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(W / 2, H / 2, 50, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // P1 End Zone (Left)
+            ctx.fillStyle = 'rgba(0, 212, 255, 0.08)';
+            ctx.fillRect(FIELD_LEFT, FIELD_TOP, END_ZONE_W, FIELD_BOTTOM - FIELD_TOP);
+            ctx.strokeStyle = 'rgba(0,212,255,0.35)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(PLAY_LEFT, FIELD_TOP);
+            ctx.lineTo(PLAY_LEFT, FIELD_BOTTOM);
+            ctx.stroke();
+
+            // P2 End Zone (Right)
+            ctx.fillStyle = 'rgba(255, 77, 109, 0.08)';
+            ctx.fillRect(PLAY_RIGHT, FIELD_TOP, END_ZONE_W, FIELD_BOTTOM - FIELD_TOP);
+            ctx.strokeStyle = 'rgba(255,77,109,0.35)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(PLAY_RIGHT, FIELD_TOP);
+            ctx.lineTo(PLAY_RIGHT, FIELD_BOTTOM);
+            ctx.stroke();
+
+            // End zone labels
+            ctx.save();
+            ctx.translate(FIELD_LEFT + END_ZONE_W / 2, H / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillStyle = 'rgba(0,212,255,0.35)';
+            ctx.font = 'bold 12px Orbitron, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('P1 GÖL', 0, 0);
+            ctx.restore();
+
+            ctx.save();
+            ctx.translate(PLAY_RIGHT + END_ZONE_W / 2, H / 2);
+            ctx.rotate(Math.PI / 2);
+            ctx.fillStyle = 'rgba(255,77,109,0.35)';
+            ctx.font = 'bold 12px Orbitron, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('P2 GÖL', 0, 0);
+            ctx.restore();
+
+            // ── ŞUT KALELERİ (Her zaman görünür) ──
+            drawShotGoal(PLAY_LEFT, H / 2, SHOT_GOAL_H, '#00d4ff', -1);
+            drawShotGoal(PLAY_RIGHT, H / 2, SHOT_GOAL_H, '#ff4d6d', 1);
+
+            // ── PENALTY GOAL ──
+            if (gs.penaltyMode && gs.penaltyMode.active) {
+                const pm = gs.penaltyMode;
+                const gx = pm.goalX;
+                const gy = pm.goalY;
+                const gh = pm.goalH;
+                const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+
+                ctx.save();
+                // Glow
+                ctx.shadowColor = '#ffaa00';
+                ctx.shadowBlur = 30 * pulse;
+                // Goal posts (American football style)
+                ctx.strokeStyle = `rgba(255,170,0,${0.8 + 0.2 * pulse})`;
+                ctx.lineWidth = 5;
+                // Crossbar
+                ctx.beginPath();
+                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy - gh / 2);
+                ctx.lineTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy + gh / 2);
+                ctx.stroke();
+                // Top post
+                ctx.beginPath();
+                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy - gh / 2);
+                ctx.lineTo(pm.keeper === 'p1' ? gx - 40 : gx + 40, gy - gh / 2 - 30);
+                ctx.stroke();
+                // Bottom post
+                ctx.beginPath();
+                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy + gh / 2);
+                ctx.lineTo(pm.keeper === 'p1' ? gx - 40 : gx + 40, gy + gh / 2 + 30);
+                ctx.stroke();
+                // Fill zone
+                ctx.globalAlpha = 0.15 * pulse;
+                ctx.fillStyle = '#ffaa00';
+                ctx.fillRect(
+                    pm.keeper === 'p1' ? FIELD_LEFT : gx,
+                    gy - gh / 2,
+                    pm.keeper === 'p1' ? gx - FIELD_LEFT : FIELD_RIGHT - gx,
+                    gh
+                );
+                ctx.globalAlpha = 1;
+                // Label
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#ffaa00';
+                ctx.font = 'bold 14px Orbitron, monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('PENALTİ KALE', gx, gy - gh / 2 - 40);
+                ctx.restore();
+            }
+
+            // Field border
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, 12);
+            ctx.stroke();
+        }
+
+        // Helper: draw the always-visible shot goal at the end zone line
+        // dir: -1 = sol kale (postlar end zone'a doğru sola uzanır)
+        //      +1 = sağ kale (postlar end zone'a doğru sağa uzanır)
+        function drawShotGoal(x, cy, h, color, dir) {
+            const goalTop = cy - h / 2;
+            const goalBot = cy + h / 2;
+
+            ctx.save();
+
+            // End zone içinde gol bölgesi vurgu dolgusu
+            const endZoneStart = dir === -1 ? FIELD_LEFT : x;
+            const endZoneWidth = dir === -1 ? (x - FIELD_LEFT) : (FIELD_RIGHT - x);
+            const fillGrad = ctx.createLinearGradient(
+                dir === -1 ? endZoneStart : endZoneStart + endZoneWidth, 0,
+                dir === -1 ? endZoneStart + endZoneWidth : endZoneStart, 0
+            );
+            fillGrad.addColorStop(0, color + '00');
+            fillGrad.addColorStop(1, color + '33');
+            ctx.fillStyle = fillGrad;
+            ctx.fillRect(endZoneStart, goalTop, endZoneWidth, h);
+
+            // Üst & alt postlar (end zone içine uzanır)
+            const postLen = 24;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 10;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x, goalTop);
+            ctx.lineTo(x + dir * postLen, goalTop);
+            ctx.moveTo(x, goalBot);
+            ctx.lineTo(x + dir * postLen, goalBot);
+            ctx.stroke();
+
+            // Gol ağzı (kesikli dikey çizgi)
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, goalTop);
+            ctx.lineTo(x, goalBot);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.lineCap = 'butt';
+
+            ctx.restore();
+        }
+
+        // ─────────────── WALL HELPERS & DRAWING ───────────────
+        // Duvar tüm gol çizgisi yüksekliğinin 1/3'ünü kaplar
+        function wallSegmentBounds(pos) {
+            const fullH = FIELD_BOTTOM - FIELD_TOP;
+            const segH = fullH / 3;
+            const top = FIELD_TOP + pos * segH;
+            return { top, bot: top + segH, segH };
+        }
+
+        function yInWallSegment(y, pos) {
+            const seg = wallSegmentBounds(pos);
+            return y >= seg.top && y <= seg.bot;
+        }
+
+        function drawWalls() {
+            // Yerleştirilmiş duvarlar
+            (gs.walls || []).forEach(w => {
+                const x = w.side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
+                const seg = wallSegmentBounds(w.pos);
+                const color = w.owner === 'p1' ? '#00d4ff' : '#ff4d6d';
+                const lifeAlpha = Math.min(1, w.life / 1500);
+                const wW = 14;
+                ctx.save();
+                ctx.globalAlpha = lifeAlpha;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 16;
+                ctx.fillStyle = color;
+                ctx.fillRect(x - wW / 2, seg.top, wW, seg.segH);
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'rgba(255,255,255,0.28)';
+                ctx.fillRect(x - wW / 2, seg.top, wW, 4);
+                ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                ctx.fillRect(x - wW / 2, seg.bot - 4, wW, 4);
+                // Tuğla deseni
+                ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+                ctx.lineWidth = 1.2;
+                const brickH = 14;
+                ctx.beginPath();
+                let row = 0;
+                for (let yy = seg.top + brickH; yy < seg.bot; yy += brickH) {
+                    ctx.moveTo(x - wW / 2, yy);
+                    ctx.lineTo(x + wW / 2, yy);
+                    const offX = (row % 2 === 0) ? -wW / 4 : wW / 4;
+                    ctx.moveTo(x + offX, yy);
+                    ctx.lineTo(x + offX, Math.min(seg.bot, yy + brickH));
+                    row++;
+                }
+                ctx.stroke();
+                ctx.restore();
+            });
+            // Ön izleme (preview)
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                if (!p || !p.wallPreview || !p.wallPreview.active) return;
+                const side = (p.team || pid) === 'p1' ? 'left' : 'right';
+                const x = side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
+                const seg = wallSegmentBounds(p.wallPreview.pos);
+                const color = pid === 'p1' ? '#00d4ff' : '#ff4d6d';
+                const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 180);
+                const wW = 18;
+                ctx.save();
+                ctx.globalAlpha = 0.18 + 0.32 * pulse;
+                ctx.fillStyle = color;
+                ctx.fillRect(x - wW / 2, seg.top, wW, seg.segH);
+                ctx.globalAlpha = 0.9;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([8, 6]);
+                ctx.strokeRect(x - wW / 2, seg.top, wW, seg.segH);
+                ctx.setLineDash([]);
+                // Hold ilerlemesi göstergesi (segmentin sağında dikey bar)
+                const prog = Math.min(1, p.wallPreview.holdMs / 380);
+                if (prog > 0) {
+                    ctx.globalAlpha = 1;
+                    ctx.fillStyle = '#ffd700';
+                    const barH = seg.segH * prog;
+                    const barX = side === 'left' ? x + wW / 2 + 4 : x - wW / 2 - 8;
+                    ctx.fillRect(barX, seg.top + (seg.segH - barH) / 2, 4, barH);
+                }
+                ctx.restore();
+            });
+        }
+
+        // Helper: draw a single player body at position (x,y) with given style
+        function drawPlayerBody(x, y, r, color, frozenTimer, poweredTimer, label, slideTimer, slideVx, slideVy, pid) {
+            const speedBoostTimer = (gs.players[pid] && gs.players[pid].speedBoostTimer) || 0;
+            ctx.save();
+            let glowColor = color;
+            let glowSize = 20;
+            if (poweredTimer > 0) { glowColor = '#ffd700'; glowSize = 35; }
+            if (frozenTimer > 0) { glowColor = '#88eeff'; glowSize = 25; }
+            if (speedBoostTimer > 0) { glowColor = '#00ffff'; glowSize = 28; }
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = glowSize;
+
+            if (frozenTimer > 0) ctx.fillStyle = '#88eeff';
+            else if (poweredTimer > 0) ctx.fillStyle = '#ffd700';
+            else ctx.fillStyle = color;
+
+            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(x, y, Math.max(0, r - 4), 0, Math.PI * 2); ctx.stroke();
+
+            // Slide trail
+            if (slideTimer > 0) {
+                ctx.globalAlpha = 0.4;
+                ctx.fillStyle = pid === 'p1' ? '#aa00ff' : '#ff88bb';
+                ctx.beginPath(); ctx.arc(x - slideVx * 3, y - slideVy * 3, r * 0.7, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 0.2;
+                ctx.beginPath(); ctx.arc(x - slideVx * 6, y - slideVy * 6, r * 0.5, 0, Math.PI * 2); ctx.fill();
+            }
+
+            ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Orbitron, monospace';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(label, x, y);
+
+            if (frozenTimer > 0) {
+                ctx.globalAlpha = 0.5; ctx.fillStyle = '#88eeff';
+                ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 1; ctx.fillStyle = '#fff'; ctx.font = '14px serif';
+                ctx.fillText('❄', x, y - (r + 10));
+            }
+            if (poweredTimer > 0) {
+                const pulse = 0.3 + 0.3 * Math.sin(Date.now() / 80);
+                ctx.globalAlpha = pulse; ctx.fillStyle = '#ffd700';
+                ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 20;
+                ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+            if (speedBoostTimer > 0) {
+                const pulse = 0.4 + 0.4 * Math.sin(Date.now() / 70);
+                ctx.globalAlpha = pulse;
+                ctx.strokeStyle = '#00ffff';
+                ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 18;
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(x, y, r + 8, 0, Math.PI * 2); ctx.stroke();
+                ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+            }
+            ctx.restore();
+        }
+
+        function drawPlayer(pid) {
+            const p = gs.players[pid];
+            const label = pid === 'p1' ? 'P1' : 'P2';
+
+            // Hide keeper during penalty
+            if (gs.penaltyMode && gs.penaltyMode.active && pid === gs.penaltyMode.keeper) return;
+
+            if (p.clones.length > 0) {
+                // Build list of all 3 bodies (2 clones + real) and shuffle draw order
+                // so Z-order doesn't give away which is real
+                const bodies = [
+                    { x: p.x, y: p.y, real: true },
+                    ...p.clones.map(c => ({ x: c.x, y: c.y, real: false })),
+                ];
+                // Fisher-Yates shuffle using a stable per-frame seed
+                const seed = Math.floor(Date.now() / 200); // changes every 200ms
+                bodies.sort((a, b) => Math.sin(seed + (a.real ? 1 : 0)) - 0.5);
+
+                bodies.forEach(b => {
+                    drawPlayerBody(b.x, b.y, p.r, p.color, p.frozenTimer, p.poweredTimer, label, p.slideTimer, p.slideVx, p.slideVy, pid);
+                });
+                // Controls-reversed indicator (only on real)
+                if (p.controlsReversedTimer > 0) {
+                    ctx.save(); ctx.fillStyle = '#ff88bb'; ctx.font = '13px serif';
+                    ctx.textAlign = 'center'; ctx.fillText('🔀', p.x, p.y - 28); ctx.restore();
+                }
+                return; // skip standard draw below
+            }
+
+            // Standard draw for non-clone mode
+            drawPlayerBody(p.x, p.y, p.r, p.color, p.frozenTimer, p.poweredTimer, label, p.slideTimer, p.slideVx, p.slideVy, pid);
+
+            // Controls-reversed indicator
+            if (p.controlsReversedTimer > 0) {
+                ctx.save(); ctx.fillStyle = '#ff88bb'; ctx.font = '13px serif';
+                ctx.textAlign = 'center'; ctx.fillText('🔀', p.x, p.y - 28); ctx.restore();
+            }
+        }
+
+        function drawBall() {
+            const b = gs.ball;
+
+            // Görünmez top: çizimi atla
+            if (gs.invisBallTimer > 0) return;
+
+            ctx.save();
+
+            // Lob landing shadow
+            if (b.lobMode) {
+                const shadowScale = 0.4 + 0.6 * b.lobProgress;
+                ctx.globalAlpha = 0.2 * (1 - Math.abs(b.lobProgress - 0.5) * 2);
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.ellipse(b.lobTo.x, b.lobTo.y, BALL_R * 1.5 * shadowScale, BALL_R * 0.6 * shadowScale, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+
+            // Holder ring — colored outline around ball showing who owns it
+            const lobScale = b.lobMode ? (1 + 0.5 * Math.sin(b.lobProgress * Math.PI)) : 1;
+            const effectiveR = BALL_R * lobScale;
+
+            if (b.holder === 'p1') {
+                // Pulsing ownership ring
+                const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
+                ctx.shadowColor = '#00d4ff';
+                ctx.shadowBlur = 18 * pulse;
+                ctx.strokeStyle = '#00d4ff';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, effectiveR + 4, 0, Math.PI * 2);
+                ctx.stroke();
+            } else if (b.holder === 'p2') {
+                const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
+                ctx.shadowColor = '#ff4d6d';
+                ctx.shadowBlur = 18 * pulse;
+                ctx.strokeStyle = '#ff4d6d';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, effectiveR + 4, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Ball glow
+            ctx.shadowColor = b.longPassMode ? '#ff66ff' : '#ffee00';
+            ctx.shadowBlur = b.longPassMode ? 35 : (b.holder ? 12 : 25);
+
+            // Ball body
+            const ballGrad = ctx.createRadialGradient(b.x - 3, b.y - 3, 1, b.x, b.y, effectiveR);
+            ballGrad.addColorStop(0, '#fff8cc');
+            ballGrad.addColorStop(0.4, '#ffcc00');
+            ballGrad.addColorStop(1, '#cc7700');
+            ctx.fillStyle = ballGrad;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, effectiveR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Ball outline
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(255,238,0,0.8)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, effectiveR, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Ball laces
+            ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(b.x, b.y - effectiveR * 0.5);
+            ctx.lineTo(b.x, b.y + effectiveR * 0.5);
+            ctx.stroke();
+            // Horizontal lace lines
+            [-0.2, 0, 0.2].forEach(offs => {
+                ctx.beginPath();
+                ctx.moveTo(b.x - effectiveR * 0.3, b.y + offs * effectiveR);
+                ctx.lineTo(b.x + effectiveR * 0.3, b.y + offs * effectiveR);
+                ctx.stroke();
+            });
+
+            ctx.restore();
+
+            // Decoy balls on clones: if player holds the ball and has clones,
+            // draw identical-looking balls at each clone position
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                if (b.holder === pid && p.clones && p.clones.length > 0) {
+                    p.clones.forEach(c => {
+                        const cx = c.x + p.lastDirX * (PLAYER_R * 0.7);
+                        const cy = c.y + p.lastDirY * (PLAYER_R * 0.7);
+                        ctx.save();
+                        // Same pulsing ownership ring as real ball
+                        const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
+                        ctx.shadowColor = p.color; ctx.shadowBlur = 18 * pulse;
+                        ctx.strokeStyle = p.color; ctx.lineWidth = 3;
+                        ctx.beginPath(); ctx.arc(cx, cy, BALL_R + 4, 0, Math.PI * 2); ctx.stroke();
+                        // Ball body
+                        ctx.shadowColor = '#ffee00'; ctx.shadowBlur = 12;
+                        const fg = ctx.createRadialGradient(cx - 3, cy - 3, 1, cx, cy, BALL_R);
+                        fg.addColorStop(0, '#fff8cc'); fg.addColorStop(0.4, '#ffcc00'); fg.addColorStop(1, '#cc7700');
+                        ctx.fillStyle = fg;
+                        ctx.beginPath(); ctx.arc(cx, cy, BALL_R, 0, Math.PI * 2); ctx.fill();
+                        ctx.shadowBlur = 0;
+                        ctx.strokeStyle = 'rgba(255,238,0,0.8)'; ctx.lineWidth = 1.5;
+                        ctx.beginPath(); ctx.arc(cx, cy, BALL_R, 0, Math.PI * 2); ctx.stroke();
+                        ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1.5;
+                        ctx.beginPath(); ctx.moveTo(cx, cy - BALL_R * 0.5); ctx.lineTo(cx, cy + BALL_R * 0.5); ctx.stroke();
+                        [-0.2, 0, 0.2].forEach(o => {
+                            ctx.beginPath();
+                            ctx.moveTo(cx - BALL_R * 0.3, cy + o * BALL_R);
+                            ctx.lineTo(cx + BALL_R * 0.3, cy + o * BALL_R);
+                            ctx.stroke();
+                        });
+                        ctx.restore();
+                    });
+                }
+            });
+        }
+
+        function drawFreezeProjectile() {
+            if (!gs.freezeProjectile) return;
+            const fp = gs.freezeProjectile;
+            ctx.save();
+            ctx.shadowColor = '#88eeff';
+            ctx.shadowBlur = 20;
+            ctx.fillStyle = '#88eeff';
+            ctx.beginPath();
+            ctx.arc(fp.x, fp.y, 7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawHook() {
+            // Flying hook
+            if (gs.hookProjectile) {
+                const hp = gs.hookProjectile;
+                const owner = gs.players[hp.owner];
+                ctx.save();
+                // Rope
+                ctx.strokeStyle = '#ffaa33';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(owner.x, owner.y);
+                ctx.lineTo(hp.x, hp.y);
+                ctx.stroke();
+                // Hook head
+                ctx.setLineDash([]);
+                ctx.shadowColor = '#ffaa33';
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = '#ffaa33';
+                ctx.beginPath();
+                ctx.arc(hp.x, hp.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+            // Active pulling rope
+            ['p1', 'p2'].forEach(pid => {
+                const p = gs.players[pid];
+                if (p.pullingTimer > 0 && p.pulledBy) {
+                    const owner = gs.players[p.pulledBy];
+                    ctx.save();
+                    ctx.strokeStyle = '#ffaa33';
+                    ctx.lineWidth = 4;
+                    ctx.setLineDash([10, 5]);
+                    ctx.lineDashOffset = -Date.now() * 0.02;
+                    ctx.beginPath();
+                    ctx.moveTo(owner.x, owner.y);
+                    ctx.lineTo(p.x, p.y);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            });
+        }
+
+        function drawSlowZones() {
+            gs.slowZones.forEach(z => {
+                ctx.save();
+                ctx.globalAlpha = Math.min(1, z.life / 500) * 0.4;
+                ctx.beginPath();
+                ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#33ffaa';
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#fff';
+                ctx.stroke();
+
+                ctx.globalAlpha *= 0.5;
+                ctx.clip();
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctx.lineWidth = 1;
+                for (let i = z.x - z.radius; i < z.x + z.radius; i += 20) {
+                    ctx.beginPath(); ctx.moveTo(i, z.y - z.radius); ctx.lineTo(i + 20, z.y + z.radius); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(i, z.y + z.radius); ctx.lineTo(i + 20, z.y - z.radius); ctx.stroke();
+                }
+                ctx.restore();
+            });
+
+            gs.slowOrbProjectiles.forEach(orb => {
+                ctx.save();
+                const t = orb.progress;
+                const size = 8 + Math.sin(t * Math.PI) * 8; // pulse
+                ctx.shadowColor = '#33ffaa';
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = '#33ffaa';
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, size * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        function drawSmokeZones() {
+            gs.smokeZones.forEach(z => {
+                ctx.save();
+                const lifeAlpha = Math.min(1, z.life / 800);
+                for (let i = 0; i < 6; i++) {
+                    const angle = (i / 6) * Math.PI * 2 + Date.now() * 0.001 + i;
+                    const ox = Math.cos(angle) * (z.radius * 0.25);
+                    const oy = Math.sin(angle) * (z.radius * 0.25);
+                    const grad = ctx.createRadialGradient(z.x + ox, z.y + oy, 0, z.x + ox, z.y + oy, z.radius);
+                    grad.addColorStop(0, `rgba(220, 220, 220, ${0.98 * lifeAlpha})`);
+                    grad.addColorStop(0.5, `rgba(180, 180, 180, ${0.85 * lifeAlpha})`);
+                    grad.addColorStop(1, 'rgba(120, 120, 120, 0)');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(z.x + ox, z.y + oy, z.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            });
+            gs.smokeProjectiles.forEach(orb => {
+                ctx.save();
+                const t = orb.progress;
+                const size = 12 + Math.sin(t * Math.PI) * 12;
+                ctx.shadowColor = '#fff'; ctx.shadowBlur = 20;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(orb.x, orb.y, size, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        function drawPenaltyBar() {
+            const pm = gs.penaltyMode;
+            if (!pm || !pm.active) return;
+
+            const BAR_W = Math.min(W * 0.6, 500);
+            const BAR_H = 28;
+            const BAR_X = (W - BAR_W) / 2;
+            const BAR_Y = H - 80;
+            const CORNER = 8;
+
+            ctx.save();
+
+            // Background panel
+            ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            ctx.beginPath();
+            ctx.roundRect(BAR_X - 20, BAR_Y - 38, BAR_W + 40, BAR_H + 58, 12);
+            ctx.fill();
+
+            // Title
+            const kickerColor = pm.kicker === 'p1' ? '#00d4ff' : '#ff4d6d';
+            ctx.fillStyle = kickerColor;
+            ctx.font = 'bold 13px Orbitron, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(
+                (pm.kicker === 'p1' ? '🔵 P1' : '🔴 P2') + ' PENALTİ — Vurmak için [SPACE] bas!',
+                W / 2, BAR_Y - 14
+            );
+
+            // Red bar background
+            ctx.fillStyle = '#cc2222';
+            ctx.beginPath();
+            ctx.roundRect(BAR_X, BAR_Y, BAR_W, BAR_H, CORNER);
+            ctx.fill();
+
+            // Green zone
+            const gx = BAR_X + pm.greenStart * BAR_W;
+            const gw = pm.greenWidth * BAR_W;
+            ctx.fillStyle = '#00cc55';
+            ctx.beginPath();
+            ctx.roundRect(gx, BAR_Y, gw, BAR_H, 4);
+            ctx.fill();
+
+            // Green zone glow
+            ctx.shadowColor = '#00ff88';
+            ctx.shadowBlur = 12;
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(gx, BAR_Y, gw, BAR_H, 4);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Indicator (needle)
+            const needleX = BAR_X + pm.barPos * BAR_W;
+            const inGreen = pm.barPos >= pm.greenStart && pm.barPos <= pm.greenStart + pm.greenWidth;
+            ctx.fillStyle = pm.shot ? (inGreen ? '#00ff88' : '#ffffff') : '#ffffff';
+            ctx.shadowColor = pm.shot && inGreen ? '#00ff88' : '#fff';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.moveTo(needleX, BAR_Y - 6);
+            ctx.lineTo(needleX + 7, BAR_Y + BAR_H + 6);
+            ctx.lineTo(needleX - 7, BAR_Y + BAR_H + 6);
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Bar border
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(BAR_X, BAR_Y, BAR_W, BAR_H, CORNER);
+            ctx.stroke();
+
+            // Fouler hint
+            const foulerKey = pm.keeper === 'p1' ? 'F' : 'L';
+            ctx.fillStyle = 'rgba(255,100,100,0.8)';
+            ctx.font = '11px Orbitron, monospace';
+            ctx.fillText(
+                '⚡ ' + (pm.keeper === 'p1' ? 'P1' : 'P2') + ': [' + foulerKey + '] bas → hızı artır!',
+                W / 2, BAR_Y + BAR_H + 18
+            );
+
+            ctx.restore();
+        }
+
+        // ─────────────── BOT LOGIC ───────────────
+        function updateBots(dt) {
+            if (!gameRunning || gameOver) return;
+            const b = gs.ball;
+            Object.keys(gs.players).forEach(pid => {
+                const p = gs.players[pid];
+                if (!p.isBot || p.frozenTimer > 0) return;
+
+                const speed = PLAYER_SPEED * 0.85; // Bots are slightly slower
+                let targetX = b.x;
+                let targetY = b.y;
+
+                // Simple AI state machine
+                if (b.holder === pid) {
+                    // I have the ball, run to enemy endzone
+                    targetX = p.team === 'p1' ? FIELD_RIGHT : FIELD_LEFT;
+                    targetY = H / 2;
+                } else if (b.holder && b.holder !== pid) {
+                    const holderTeam = gs.players[b.holder].team;
+                    if (holderTeam === p.team) {
+                        // Teammate has ball, run forward to receive pass or block
+                        targetX = p.team === 'p1' ? FIELD_RIGHT - 100 : FIELD_LEFT + 100;
+                        // Stay on own lane
+                        targetY = p.y;
+                    } else {
+                        // Enemy has ball, intercept
+                        targetX = b.x;
+                        targetY = b.y;
+                    }
+                }
+
+                // Smooth movement towards target
+                const dx = targetX - p.x;
+                const dy = targetY - p.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > 5) {
+                    // We directly set virtual key presses for updatePlayer to handle
+                    const moveX = dx / dist;
+                    const moveY = dy / dist;
+
+                    // Instead of simulating keys, since updatePlayer uses keys[] explicitly,
+                    // we can just set p.vx and p.vy directly because updatePlayer checks `!p.isBot` or we can override it.
+                    // Wait, updatePlayer reads `keys` for p1 and p2! Let's just set velocities here.
+                    p.vx = moveX * speed;
+                    p.vy = moveY * speed;
+                    p.lastDirX = p.vx > 0 ? 1 : (p.vx < 0 ? -1 : p.lastDirX);
+                    p.lastDirY = p.vy > 0 ? 1 : (p.vy < 0 ? -1 : 0);
+                    if (p.lastDirX !== 0) p.facing = p.lastDirX;
+                } else {
+                    p.vx = 0;
+                    p.vy = 0;
+                }
+
+                // Auto throw if close to goal and blocked? For now, just run.
+            });
+        }
+
+        // ─────────────── GLOBAL EFFECTS ───────────────
+        function updateEffects(dt) {
+            if (gs.blindTimer > 0) gs.blindTimer -= dt;
+            if (gs.invisBallTimer > 0) gs.invisBallTimer -= dt;
+            if (gs.walls && gs.walls.length) {
+                gs.walls.forEach(w => { w.life -= dt; });
+                gs.walls = gs.walls.filter(w => w.life > 0);
+            }
+        }
+
+        // ─────────────── MAIN LOOP ───────────────
+        let lastTime = 0;
+        function gameLoop(ts) {
+            if (!gameRunning) return;
+            const dt = Math.min(ts - lastTime, 50);
+            lastTime = ts;
+
+            pollGamepadActions();
+
+            // Update Bots
+            updateBots(dt);
+
+            // Update Players
+            Object.keys(gs.players).forEach(pid => {
+                updatePlayer(pid, dt);
+            });
+            updateBall(dt);
+            updatePenaltyBar(dt);
+            checkCollisions(dt);
+            checkGoal();
+            updateParticles(dt);
+            updateHUD(dt);
+            updateEffects(dt);
+
+            // Draw — players first, ball on top so it's always visible
+            drawField();
+            drawSlowZones();
+            drawFreezeProjectile();
+            drawHook();
+            drawWalls();
+            Object.keys(gs.players).forEach(pid => drawPlayer(pid));
+            drawBall();
+            drawSmokeZones();
+            drawParticles();
+            drawPenaltyBar();
+
+            // Kör etme etkisi: sahayı siyaha bürü
+            if (gs.blindTimer > 0) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.96)';
+                ctx.fillRect(0, 0, W, H);
+                ctx.restore();
+            }
+
+            animId = requestAnimationFrame(gameLoop);
+        }
+
+        // ─────────────── START/RESTART ───────────────
+        function startGame() {
+            document.getElementById('overlay').classList.add('hidden');
+            initSkillSelection();
+        }
+
+        function initSkillSelection() {
+            document.getElementById('skill-selection-overlay').classList.remove('hidden');
+            p1Profile = null; p2Profile = null;
+            p1SelectedSkills = [];
+            p2SelectedSkills = [];
+
+            ['p1', 'p2'].forEach(pid => {
+                const profileRow = document.getElementById(`${pid}-profile-row`);
+                profileRow.innerHTML = '';
+                PROFILES.forEach(prof => {
+                    const card = document.createElement('div');
+                    card.className = 'profile-card';
+                    card.style.color = prof.color;
+                    card.innerHTML = `<div class="profile-icon">${prof.icon}</div><div class="profile-name">${prof.name}</div>`;
+                    card.onclick = () => selectProfile(pid, prof);
+                    profileRow.appendChild(card);
+                });
+                document.getElementById(`${pid}-skill-pool`).innerHTML = '';
+                document.getElementById(`${pid}-pick-hint`).textContent = 'Sınıf seçin';
+            });
+            updateSkillSelectionUI();
+        }
+
+        function selectProfile(pid, prof) {
+            if (pid === 'p1') { p1Profile = prof; p1SelectedSkills = []; }
+            else { p2Profile = prof; p2SelectedSkills = []; }
+
+            // Highlight selected profile card
+            const profileRow = document.getElementById(`${pid}-profile-row`);
+            Array.from(profileRow.children).forEach((c, i) => {
+                c.classList.toggle('selected', PROFILES[i].id === prof.id);
+            });
+
+            // Slot containerını dinamik kur
+            renderSkillSlots(pid, prof.slots);
+
+            // Build skill pool from profile's allowed skills
+            const pool = document.getElementById(`${pid}-skill-pool`);
+            pool.innerHTML = '';
+            const skills = prof.skills.map(id => ALL_SKILLS.find(s => s.id === id)).filter(Boolean);
+            const hint = document.getElementById(`${pid}-pick-hint`);
+            const pickCount = prof.slots;
+
+            if (skills.length <= pickCount) {
+                if (pid === 'p1') p1SelectedSkills = skills.slice();
+                else p2SelectedSkills = skills.slice();
+                hint.textContent = 'Sınıf skilleri otomatik atandı';
+                skills.forEach(sk => {
+                    const card = createSkillCard(sk);
+                    card.classList.add('selected', 'locked');
+                    pool.appendChild(card);
+                });
+            } else {
+                hint.textContent = `${skills.length} skilden ${pickCount} tane seç`;
+                skills.forEach(sk => {
+                    const card = createSkillCard(sk);
+                    card.onclick = () => toggleSkill(pid, sk, card, pickCount);
+                    pool.appendChild(card);
+                });
+            }
+            updateSkillSelectionUI();
+        }
+
+        function renderSkillSlots(pid, count) {
+            const cont = document.getElementById(`${pid}-selected-skills`);
+            cont.innerHTML = '';
+            for (let i = 0; i < count; i++) {
+                const slot = document.createElement('div');
+                slot.className = 'selected-slot';
+                slot.id = `${pid}-slot-${i}`;
+                cont.appendChild(slot);
+            }
+        }
+
+        function createSkillCard(sk) {
+            const card = document.createElement('div');
+            card.className = 'skill-card';
+            card.style.color = sk.color;
+            card.dataset.skillId = sk.id;
+            card.innerHTML = `<div class="skill-icon">${sk.icon}</div><div class="skill-name">${sk.name}</div>`;
+            return card;
+        }
+
+        function toggleSkill(pid, sk, cardEl, maxPick) {
+            const arr = pid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+            const limit = maxPick || ((pid === 'p1' ? p1Profile : p2Profile)?.slots) || 3;
+            const idx = arr.findIndex(s => s.id === sk.id);
+            if (idx !== -1) {
+                arr.splice(idx, 1);
+                cardEl.classList.remove('selected');
+            } else {
+                if (arr.length >= limit) return;
+                arr.push(sk);
+                cardEl.classList.add('selected');
+            }
+            updateSkillSelectionUI();
+        }
+
+        function updateSkillSelectionUI() {
+            ['p1', 'p2'].forEach(pid => {
+                const prof = pid === 'p1' ? p1Profile : p2Profile;
+                const arr = pid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+                const slots = prof ? prof.slots : 0;
+                for (let i = 0; i < slots; i++) {
+                    const slotEl = document.getElementById(`${pid}-slot-${i}`);
+                    if (!slotEl) continue;
+                    const s = arr[i];
+                    slotEl.innerHTML = s ? s.icon : '';
+                    slotEl.style.borderColor = s ? s.color : 'rgba(255,255,255,0.3)';
+                }
+            });
+
+            const btn = document.getElementById('confirm-skills-btn');
+            const p1Need = p1Profile ? p1Profile.slots : 99;
+            const p2Need = p2Profile ? p2Profile.slots : 99;
+            btn.disabled = (!p1Profile || !p2Profile || p1SelectedSkills.length < p1Need || p2SelectedSkills.length < p2Need);
+        }
+
+        function confirmSkills() {
+            document.getElementById('skill-selection-overlay').classList.add('hidden');
+            _doStartGame();
+        }
+
+        function _doStartGame() {
+            if (animId) cancelAnimationFrame(animId);
+            if (gs.timerInterval) clearInterval(gs.timerInterval);
+            particles = [];
+            keys = {};
+            gameOver = false;
+            gameRunning = true;
+
+            initState();
+
+            // Assign selected abilities and keys (4. slot için T/Y eklendi)
+            const p1Keys = ['KeyQ', 'KeyE', 'KeyR', 'KeyT'];
+            const p2Keys = ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
+            gs.players.p1.abilities = p1SelectedSkills.map((sk, i) => ({ ...sk, key: p1Keys[i], cdLeft: 0, active: false }));
+            gs.players.p2.abilities = p2SelectedSkills.map((sk, i) => ({ ...sk, key: p2Keys[i], cdLeft: 0, active: false }));
+            gs.players.p1.profile = p1Profile;
+            gs.players.p2.profile = p2Profile;
+
+            buildHUD();
+
+            // Restore overlay content in case of restart
+            const overlay = document.getElementById('overlay');
+            overlay.querySelector('h2').textContent = '⚡ GRID RUSH';
+            overlay.querySelector('h2').style.color = '';
+            document.getElementById('start-btn').textContent = 'YENİDEN OYNA';
+            overlay.classList.add('hidden');
+            // Blur start button so Space key doesn't re-trigger it
+            document.getElementById('start-btn').blur();
+
+            // Timer
+            let timeLeft = 180;
+            document.getElementById('timer-display').textContent = formatTime(timeLeft);
+            gs.timerInterval = setInterval(() => {
+                if (!gameRunning) return;
+                timeLeft--;
+                document.getElementById('timer-display').textContent = formatTime(timeLeft);
+                if (timeLeft <= 0) {
+                    clearInterval(gs.timerInterval);
+                    // Who has more score wins
+                    const winner = gs.score[0] > gs.score[1] ? 'p1' : gs.score[1] > gs.score[0] ? 'p2' : 'draw';
+                    if (winner === 'draw') {
+                        showFlash('⚖️ BERABERE!', '#fff');
+                        setTimeout(() => { endGame('p1'); }, 1500); // show overlay as P1 for draw
+                    } else {
+                        endGame(winner);
+                    }
+                }
+            }, 1000);
+
+            lastTime = performance.now();
+            animId = requestAnimationFrame(gameLoop);
+            showFlash('🏈 BAŞLA!', '#ffffff');
+        } // end _doStartGame
+
+        function formatTime(s) {
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            return `${m}:${sec.toString().padStart(2, '0')}`;
+        }
+
+        // ─────────────── RESIZE & INITIAL DRAW ───────────────
+        // Wait one frame so layout is complete before measuring
+        requestAnimationFrame(() => {
+            resizeGame();
+            initState();
+            buildHUD();
+            drawField();
+
+            // Draw initial ball
+            const b = gs.ball;
+            ctx.save();
+            ctx.shadowColor = '#ffee00';
+            ctx.shadowBlur = 25;
+            const bg = ctx.createRadialGradient(b.x - 3, b.y - 3, 1, b.x, b.y, BALL_R);
+            bg.addColorStop(0, '#fff8cc');
+            bg.addColorStop(0.4, '#ffcc00');
+            bg.addColorStop(1, '#cc7700');
+            ctx.fillStyle = bg;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, BALL_R, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        });
+
+        window.addEventListener('resize', () => {
+            resizeGame();
+            if (!gameRunning) { initState(); buildHUD(); drawField(); }
+        });
