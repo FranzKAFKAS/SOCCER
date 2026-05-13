@@ -3958,6 +3958,9 @@
         // Sunucu 60Hz state yolluyor; ufak tampon paket gecikmelerini absorbe eder
         const __INTERP_DELAY_MS = 50;  // 3 frame önce render — action feedback hızlı
         let __snapshots = []; // [{t, players: {pid: {x,y,lastDirX,lastDirY}}, ball: {x,y,holder}}]
+        // Input WS: her frame JSON atmak tamponu doldurup bufferedAmount ile drop edilince takılma yapıyordu
+        let __inputSendSig = '';
+        let __lastInputPacketSentAt = 0;
 
         function setOnlineTeamSize(size) {
             onlineTeamSize = size;
@@ -4075,6 +4078,8 @@
                     document.getElementById('waiting-room').style.display = 'none';
                     document.getElementById('game-wrapper').style.display = 'flex';
                     gameStarted = true;
+                    __inputSendSig = '';
+                    __lastInputPacketSentAt = 0;
                     resizeGame();
                     requestAnimationFrame(gameLoop);
                 } else if (msg.type === 'game_init') {
@@ -4584,57 +4589,57 @@
         }
         setInterval(pollOnlineGamepad, 50);
 
-        // Yerel input fonksiyonuna analog/dpad ekle
-        const __origSendInput = sendSocketInput;
+        // Yerel input fonksiyonuna analog/dpad ekle + WS gönderimini seyrekleştir (tampon taşması / takılma)
         sendSocketInput = function () {
-            if (!gameStarted) return;
+            if (!gameStarted || !socket || socket.readyState !== WebSocket.OPEN) return;
             let dx = 0, dy = 0;
             if (keys['KeyW'] || keys['ArrowUp']) dy -= 1;
             if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
             if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
             if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
-            if (navigator.getGamepads) {
-                const gpIdx = myPid === 'p1' ? 0 : 1;
-                const gp = navigator.getGamepads()[gpIdx];
-                if (gp && gp.connected) {
-                    let gpX = 0, gpY = 0, usingAnalog = false;
-                    if (Math.abs(gp.axes[0]) > 0.2) { gpX = gp.axes[0]; usingAnalog = true; }
-                    if (Math.abs(gp.axes[1]) > 0.2) { gpY = gp.axes[1]; usingAnalog = true; }
-                    if (gp.buttons[12] && gp.buttons[12].pressed) { gpY -= 1; usingAnalog = false; }
-                    if (gp.buttons[13] && gp.buttons[13].pressed) { gpY += 1; usingAnalog = false; }
-                    if (gp.buttons[14] && gp.buttons[14].pressed) { gpX -= 1; usingAnalog = false; }
-                    if (gp.buttons[15] && gp.buttons[15].pressed) { gpX += 1; usingAnalog = false; }
-                    if (usingAnalog && dx === 0 && dy === 0) { dx = gpX; dy = gpY; }
-                    else { dx += gpX; dy += gpY; }
-                }
+            const gps = navigator.getGamepads ? navigator.getGamepads() : null;
+            const gpIdx = myPid === 'p1' ? 0 : 1;
+            const gp = gps && gps[gpIdx];
+            if (gp && gp.connected) {
+                let gpX = 0, gpY = 0, usingAnalog = false;
+                if (Math.abs(gp.axes[0]) > 0.2) { gpX = gp.axes[0]; usingAnalog = true; }
+                if (Math.abs(gp.axes[1]) > 0.2) { gpY = gp.axes[1]; usingAnalog = true; }
+                if (gp.buttons[12] && gp.buttons[12].pressed) { gpY -= 1; usingAnalog = false; }
+                if (gp.buttons[13] && gp.buttons[13].pressed) { gpY += 1; usingAnalog = false; }
+                if (gp.buttons[14] && gp.buttons[14].pressed) { gpX -= 1; usingAnalog = false; }
+                if (gp.buttons[15] && gp.buttons[15].pressed) { gpX += 1; usingAnalog = false; }
+                if (usingAnalog && dx === 0 && dy === 0) { dx = gpX; dy = gpY; }
+                else { dx += gpX; dy += gpY; }
             }
             let penaltyBarBoost = false;
             const pm = gs && gs.penaltyMode;
             if (pm && pm.active && !pm.shot && pm.keeper === myPid) {
                 penaltyBarBoost = !!(myPid === 'p1' ? keys['KeyF'] : keys['KeyL']);
-                if (!penaltyBarBoost && navigator.getGamepads) {
-                    const gpIdx = myPid === 'p1' ? 0 : 1;
-                    const gp = navigator.getGamepads()[gpIdx];
-                    if (gp && gp.connected && gp.buttons[2] && gp.buttons[2].pressed) penaltyBarBoost = true;
-                }
+                if (!penaltyBarBoost && gp && gp.connected && gp.buttons[2] && gp.buttons[2].pressed) penaltyBarBoost = true;
             }
             let wallHeld = false;
             const me = gs && gs.players && gs.players[myPid];
             if (me && me.wallPreview && me.wallPreview.active) {
                 const wallAb = me.abilities && me.abilities.find(a => a.id === 'wall');
                 if (wallAb && wallAb.key && keys[wallAb.key]) wallHeld = true;
-                if (!wallHeld && navigator.getGamepads) {
-                    const gpIdx = myPid === 'p1' ? 0 : 1;
-                    const gp = navigator.getGamepads()[gpIdx];
-                    if (gp && gp.connected && wallAb) {
-                        const abIdx = me.abilities.indexOf(wallAb);
-                        const btnIdx = ABILITY_GAMEPAD_BUTTONS[abIdx];
-                        if (btnIdx != null && gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed) wallHeld = true;
-                    }
+                if (!wallHeld && gp && gp.connected && wallAb) {
+                    const abIdx = me.abilities.indexOf(wallAb);
+                    const btnIdx = ABILITY_GAMEPAD_BUTTONS[abIdx];
+                    if (btnIdx != null && gp.buttons[btnIdx] && gp.buttons[btnIdx].pressed) wallHeld = true;
                 }
             }
-            // Buffer doluysa input drop et — backpressure ile lag birikmesin
-            if (socket.bufferedAmount > 2048) return;
+            const now = performance.now();
+            const qdx = Math.round(dx * 4) / 4;
+            const qdy = Math.round(dy * 4) / 4;
+            const sig = qdx + '\0' + qdy + '\0' + (penaltyBarBoost ? 1 : 0) + '\0' + (wallHeld ? 1 : 0);
+            const active = qdx !== 0 || qdy !== 0 || penaltyBarBoost || wallHeld;
+            const changed = sig !== __inputSendSig;
+            const heartbeat = active && (now - __lastInputPacketSentAt >= 110);
+            if (!changed && !heartbeat) return;
+            // Aynı vektörü sürekli yollamayı kes; yön değişince anında yolla. Tampon şişerse yine de yön değişimini düşürme.
+            if (socket.bufferedAmount > 16384 && !changed) return;
+            __inputSendSig = sig;
+            __lastInputPacketSentAt = now;
             socket.send(JSON.stringify({ type: 'input', dx, dy, penaltyBarBoost, wallHeld }));
         };
 
