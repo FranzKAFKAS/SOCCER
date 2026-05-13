@@ -3443,18 +3443,20 @@
             if (gameStarted && gs && gs.ball && gs.players) {
                 // ─── BALL CLIENT-SIDE PREDICTION ───
                 // Pas/şut sonrası top'u local physics ile ilerlet (RTT yüksek olsa bile lag yok)
+                // Server fiziği: BALL_FRICTION=0.93 her tick (60Hz), ball.x += vx
+                // Client da AYNI katsayıyı kullanmalı yoksa predict bitince ışınlanma olur.
                 if (__ballPredict.active) {
                     if (now >= __ballPredict.until) {
                         __ballPredict.active = false; // süre doldu → server interpolation'a geri dön
                     } else {
                         const dtBall = now - __ballPredict.lastIntegrated;
                         __ballPredict.lastIntegrated = now;
-                        // Server'ın yaptığı physics'i taklit et: hız azalır, scale 60fps eşdeğeri
                         const scale = dtBall / (1000 / 60);
                         __ballPredict.x += __ballPredict.vx * scale;
                         __ballPredict.y += __ballPredict.vy * scale;
-                        __ballPredict.vx *= Math.pow(0.985, scale);
-                        __ballPredict.vy *= Math.pow(0.985, scale);
+                        // Server ile birebir aynı friction (shotMode/longPassMode hariç ama pas için 0.93 doğru)
+                        __ballPredict.vx *= Math.pow(0.93, scale);
+                        __ballPredict.vy *= Math.pow(0.93, scale);
                     }
                 }
                 // ─── INTERPOLATION: rakip + top için pürüzsüz hareket ───
@@ -3736,10 +3738,19 @@
                     last.ball = { x: b.x, y: b.y, holder: b.holder };
                 }
             };
-            // Ball'u client-side predict modda başlat: belirtilen süre boyunca server snapshot'larını yok say
-            const startBallPredict = (durationMs) => {
+            // Ball'u client-side predict modda başlat: süre RTT'ye göre dinamik
+            // Hedef: server snapshot'larının "pas işlendi" state'i client'a ulaşana kadar predict
+            // = RTT (input→server→broadcast→client) + küçük güvenlik payı
+            const startBallPredict = (defaultDuration) => {
+                const rd = window.__rttDiag;
+                let rttEst = 150;
+                if (rd && rd.samples.length) {
+                    const sorted = rd.samples.slice().sort((a, b) => a - b);
+                    rttEst = sorted[Math.floor(sorted.length / 2)]; // median (spike'lardan korunaklı)
+                }
+                const dur = Math.max(defaultDuration, Math.min(400, rttEst * 1.25 + 60));
                 __ballPredict.active = true;
-                __ballPredict.until = performance.now() + durationMs;
+                __ballPredict.until = performance.now() + dur;
                 __ballPredict.x = b.x;
                 __ballPredict.y = b.y;
                 __ballPredict.vx = b.vx || 0;
