@@ -62,8 +62,14 @@ const SHOT_STUN_MS = 700;
 
 const TICK_RATE = 60;          // Fizik simülasyonu 60Hz
 const TICK_MS = 1000 / TICK_RATE;
-const BROADCAST_RATE = 60;     // Action feedback için her tick broadcast (paket küçük olduğu için OK)
+// Broadcast 30Hz: 60Hz simülasyon korunur ama state senkronu yarıya iner.
+// → JSON.stringify maliyeti %50 düşer, ağ paket sayısı yarıya iner (shared CPU dostu).
+// → Client interpolation snapshot başına ~33ms; INTERP_DELAY ~70ms olmalı (client tarafı).
+const BROADCAST_RATE = 30;
 const BROADCAST_INTERVAL_MS = 1000 / BROADCAST_RATE;
+// Tek bir client'ın WS send buffer'ı bu eşiği aştıysa o client için broadcast atla
+// (sloppy network → memory bloat'u engelle). Snapshot tabanlı sistem; drop OK.
+const WS_BUFFER_DROP_THRESHOLD = 256 * 1024;
 const WIN_SCORE = 5;
 const GAME_DURATION = 180;
 
@@ -153,7 +159,11 @@ class Room {
   broadcast(data) {
     const str = JSON.stringify(data);
     Object.values(this.players).forEach(ws => {
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(str);
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      // Yavaş bağlantıda backlog büyüyorsa state mesajını atla — sonraki snapshot zaten gelir.
+      // Sadece state-tipli mesajlarda drop yap; start/gameover/error gibi tek seferlikler garanti gitsin.
+      if (data && data.type === 'state' && ws.bufferedAmount > WS_BUFFER_DROP_THRESHOLD) return;
+      ws.send(str);
     });
   }
   addFlash(msg, color) { this.flashes.push({ msg, color }); }
@@ -1508,7 +1518,7 @@ class Room {
     if (this.gameOver) return;
     this.gameOver = true;
     this.started = false;
-    if (this.ticker) clearInterval(this.ticker);
+    if (this.ticker) { clearTimeout(this.ticker); this.ticker = null; }
     this.broadcast({ type: 'gameover', winner, score: this.gs.score });
   }
 
@@ -1651,26 +1661,51 @@ class Room {
     // Statik veri (color/team/profile/abilities) tek seferde gönderilir; state mesajları yalın olur
     this.broadcast(this.buildGameInit());
     this._perfSamples = [];
+    this._perfDrops = 0;
     this._perfReportAt = Date.now() + 5000;
-    this.ticker = setInterval(() => {
+    // Fixed-step tick loop with catch-up + cap (shared CPU dostu, setInterval drift'i yok).
+    // Eğer host bir loop iterasyonunu kaçırırsa accumulator dolar; max 3 tick'i catch-up'la
+    // koşturup geri kalanı atıyoruz ("spiral of death" önlemi).
+    this._tickAcc = 0;
+    const MAX_CATCHUP_TICKS = 3;
+    const loop = () => {
+      if (!this.started) return;
       const now = Date.now();
-      const dt = Math.min(now - this.lastTick, 50);
+      const elapsed = now - this.lastTick;
       this.lastTick = now;
+      this._tickAcc += elapsed;
+      // Loop iterasyonu uzun süre bloklanmışsa accumulator'ı toparla
+      if (this._tickAcc > TICK_MS * 8) {
+        this._perfDrops += Math.floor(this._tickAcc / TICK_MS) - MAX_CATCHUP_TICKS;
+        this._tickAcc = TICK_MS * MAX_CATCHUP_TICKS;
+      }
+      let ticks = 0;
       const t0 = process.hrtime.bigint();
-      this.tick(dt);
+      while (this._tickAcc >= TICK_MS && ticks < MAX_CATCHUP_TICKS) {
+        this.tick(TICK_MS);
+        this._tickAcc -= TICK_MS;
+        ticks++;
+        if (!this.started) return;
+      }
       const tickMs = Number(process.hrtime.bigint() - t0) / 1e6;
-      this._perfSamples.push(tickMs);
+      this._perfSamples.push(tickMs / Math.max(1, ticks));
       if (now > this._perfReportAt) {
         const arr = this._perfSamples;
         const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
         const max = Math.max(...arr);
         const bufP1 = (this.players.p1 && this.players.p1.bufferedAmount) || 0;
         const bufP2 = (this.players.p2 && this.players.p2.bufferedAmount) || 0;
-        console.log(`[perf] tick avg=${avg.toFixed(2)}ms max=${max.toFixed(1)}ms samples=${arr.length} | ws buffered p1=${bufP1}B p2=${bufP2}B`);
+        const drops = this._perfDrops;
+        console.log(`[perf] tick avg=${avg.toFixed(2)}ms max=${max.toFixed(1)}ms samples=${arr.length} drops=${drops} | ws buf p1=${bufP1}B p2=${bufP2}B`);
         this._perfSamples = [];
+        this._perfDrops = 0;
         this._perfReportAt = now + 5000;
       }
-    }, TICK_MS);
+      // Bir sonraki tick'e kalan süre (accumulator dolu değilse bekle)
+      const wait = Math.max(1, TICK_MS - this._tickAcc);
+      this.ticker = setTimeout(loop, wait);
+    };
+    this.ticker = setTimeout(loop, TICK_MS);
   }
 }
 
@@ -1781,7 +1816,8 @@ wss.on('connection', (ws) => {
     if (room._penaltyEndTimer) { clearTimeout(room._penaltyEndTimer); room._penaltyEndTimer = null; }
     room.removePlayer(ws.pid);
     room.broadcast({ type: 'opponent_left', pid: ws.pid });
-    if (room.ticker) clearInterval(room.ticker);
+    if (room.ticker) { clearTimeout(room.ticker); room.ticker = null; }
+    room.started = false;
     rooms.delete(ws.roomId);
   });
 });

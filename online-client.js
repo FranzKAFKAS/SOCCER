@@ -3040,7 +3040,9 @@
         const __PRED_SPEED = 3.2; // PLAYER_SPEED ile aynı
         // Interpolation: rakip + top için son 2 sunucu snapshot'ı arasında lerp
         // Sunucu 60Hz state yolluyor; ufak tampon paket gecikmelerini absorbe eder
-        const __INTERP_DELAY_MS = 50;  // 3 frame önce render — action feedback hızlı
+        // Sunucu broadcast 30Hz (her ~33ms snapshot) → 2 snapshot tampon için ~70ms uygun.
+        // Daha düşük olursa extrapolation devreye girer → opp jitter. Daha yüksek olursa input lag.
+        const __INTERP_DELAY_MS = 70;
         let __snapshots = []; // [{t, players: {pid: {x,y,lastDirX,lastDirY}}, ball: {x,y,holder}}]
         // Input WS: her frame JSON atmak tamponu doldurup bufferedAmount ile drop edilince takılma yapıyordu
         let __inputSendSig = '';
