@@ -3806,15 +3806,20 @@
                 }
                 // Non-teknik: anında fırlat
                 if (b.holder === myPid && !isTeknik) {
-                    const PASS_SPEED = 15, BALL_R = 10;
+                    const PASS_SPEED = 15;
                     const dir = Math.hypot(me.lastDirX, me.lastDirY) || 1;
                     const dx = me.lastDirX / dir, dy = me.lastDirY / dir;
+                    // Lob / tutuş çizimi gibi: topu tam ekranda gördüğümüz yerden bırak (__pred + r*0.7), sunucu spawn'ından zıplama olmasın
+                    const px = (__pred.x != null && Number.isFinite(__pred.x)) ? __pred.x : me.x;
+                    const py = (__pred.y != null && Number.isFinite(__pred.y)) ? __pred.y : me.y;
                     b.holder = null;
                     b.inAir = true;
                     b.vx = dx * PASS_SPEED * 0.72;
                     b.vy = dy * PASS_SPEED * 0.72;
-                    b.x = me.x + dx * (me.r + BALL_R + 2);
-                    b.y = me.y + dy * (me.r + BALL_R + 2);
+                    b.x = px + dx * (me.r * 0.7);
+                    b.y = py + dy * (me.r * 0.7);
+                    __ballVisX = b.x;
+                    __ballVisY = b.y;
                     syncBallSnapshot();
                     // Uzun pas / şut gibi: client-side ball predict yok — top sadece sunucu snapshot interp (daha tutarlı)
                 }
@@ -3822,17 +3827,21 @@
                 // Teknik şarjlı pas serbest bırakıldığında lokal fırlat
                 const isTeknik = me.profile && me.profile.id === 'teknik';
                 if (isTeknik && me.passCharging && b.holder === myPid) {
-                    const PASS_SPEED = 15, BALL_R = 10, MAX_MS = 900;
+                    const PASS_SPEED = 15, MAX_MS = 900;
                     const t = Math.min(1, (me.passChargeMs || 0) / MAX_MS);
                     const speedMult = 1 + t * 1.45;
                     const dir = Math.hypot(me.lastDirX, me.lastDirY) || 1;
                     const dx = me.lastDirX / dir, dy = me.lastDirY / dir;
+                    const px = (__pred.x != null && Number.isFinite(__pred.x)) ? __pred.x : me.x;
+                    const py = (__pred.y != null && Number.isFinite(__pred.y)) ? __pred.y : me.y;
                     b.holder = null;
                     b.inAir = true;
                     b.vx = dx * PASS_SPEED * speedMult;
                     b.vy = dy * PASS_SPEED * speedMult;
-                    b.x = me.x + dx * (me.r + BALL_R + 2);
-                    b.y = me.y + dy * (me.r + BALL_R + 2);
+                    b.x = px + dx * (me.r * 0.7);
+                    b.y = py + dy * (me.r * 0.7);
+                    __ballVisX = b.x;
+                    __ballVisY = b.y;
                     me.passCharging = false;
                     me.passChargeMs = 0;
                     syncBallSnapshot();
