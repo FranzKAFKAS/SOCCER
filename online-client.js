@@ -3289,33 +3289,12 @@
                         blindTimer: slim.blindTimer || 0,
                         invisBallTimer: slim.invisBallTimer || 0,
                     });
-                    // Interpolation için snapshot kaydet.
-                    // KRITIK: Server timestamp'i (msg.t) kullanıyoruz, alındığı an değil.
-                    // Network burst durumunda (3 paket aynı anda gelir) lokal saatte tümü "şimdi"
-                    // gözükür ama server'da 33ms aralıkla yollanmıştır. Server saatini lokal
-                    // saate eşleyerek (clockOffset) original timeline'ı koruyoruz.
-                    const nowLocal = performance.now();
-                    const serverT = (typeof msg.t === 'number') ? msg.t : null;
-                    if (serverT != null) {
-                        // İlk paket: offset'i ölç. Sonraki paketler aynı offset'le mapping.
-                        // Eğer offset zamanla küçük drift gösterirse adapt et (clock skew).
-                        if (window.__serverClockOffset === undefined) {
-                            window.__serverClockOffset = nowLocal - serverT;
-                        } else {
-                            // Yumuşak offset düzeltmesi: en kısa gözlemlenen RTT'yi yakala
-                            const candidateOffset = nowLocal - serverT;
-                            // Sadece "şimdiye kadarki en küçük gecikme" offset'i — en az lag'lı
-                            // paket bizim baseline'ımız. Patlamalar bu baseline'ın üzerine biner.
-                            if (candidateOffset < window.__serverClockOffset) {
-                                window.__serverClockOffset = candidateOffset;
-                            }
-                        }
-                    }
-                    const mappedT = serverT != null
-                        ? (serverT + window.__serverClockOffset)
-                        : nowLocal;
+                    // Snapshot timestamp olarak performance.now() kullan.
+                    // Server-time mapping deneyleri (min-offset tracking) snapshot buffer'ında
+                    // tutarsız t değerlerine yol açıp authX'i bozuyordu.
+                    // Nagle kapalı + network stddev=0.7ms ile arrival timing zaten ~33ms aralıklı.
                     const snap = {
-                        t: mappedT,
+                        t: performance.now(),
                         players: {},
                         ball: { x: gs.ball.x, y: gs.ball.y, holder: gs.ball.holder },
                     };
@@ -3490,51 +3469,28 @@
                 if (me) {
                     if (__pred.x === null) { __pred.x = me.x; __pred.y = me.y; }
 
-                    // Reconcile hedefini AĞ JITTER'INDEN TEMİZLE: kendi authoritative pozisyonumu
-                    // da snapshot buffer'ından interpolate et. Aksi halde 30Hz broadcast +
-                    // network jitter ile me.x ~33ms aralıklarla sıçrar, reconcile osile eder →
-                    // "takıla takıla" hissi olur. Self-interp delay opp'tan KISA (15ms) tutuldu:
-                    // input'a anlık tepki gerek; sadece jitter yumuşatması için lerp.
-                    let authX = me.x, authY = me.y;
-                    if (__snapshots.length >= 2) {
-                        const SELF_INTERP_DELAY_MS = 15;
-                        const renderTimeSelf = now - SELF_INTERP_DELAY_MS;
-                        let a = __snapshots[__snapshots.length - 2];
-                        let b = __snapshots[__snapshots.length - 1];
-                        for (let i = 0; i < __snapshots.length - 1; i++) {
-                            if (__snapshots[i].t <= renderTimeSelf && __snapshots[i + 1].t >= renderTimeSelf) {
-                                a = __snapshots[i]; b = __snapshots[i + 1]; break;
-                            }
-                        }
-                        const span = b.t - a.t;
-                        const frac = span > 0 ? Math.max(0, Math.min(1.5, (renderTimeSelf - a.t) / span)) : 1;
-                        const pa = a.players[myPid], pb = b.players[myPid];
-                        if (pa && pb) {
-                            authX = pa.x + (pb.x - pa.x) * frac;
-                            authY = pa.y + (pb.y - pa.y) * frac;
-                        }
-                    }
-
                     // ── RECONCILE ──────────────────────────────────────────────────────
-                    // Steady-state error matematiği:
-                    //   input → server round-trip ≈ 25ms → server 1.5 tick geride
-                    //   → beklenen steady-state error ≈ speed × 1.5 ≈ 4–5 px
-                    // Dead zone = 14px: bu aralıkta reconcile YAPMIYORUZ.
-                    //   → düz hareket sırasında reconcile prediction'ı geri çekmez → takıla yok.
-                    // 14–80px arası: hard collision, freeze, duvar sekmesi gibi gerçek düzeltmeler.
-                    //   → 400ms zaman sabitiyle yavaşça düzelt (görünmez geçiş).
-                    // 80px üstü: teleport/respawn → anında snap.
+                    // authX = me.x: son snapshot'taki server pozisyonu (no self-interp).
+                    // Self-interp kaldırıldı: min-offset clock mapping snapshot t'lerini
+                    // karıştırıyordu → errLen şişiyordu → reconcile her frame'de geri çekiyordu.
+                    //
+                    // Beklenen steady-state error = speed × (RTT/2 + broadcast_interval/2) / tick_ms
+                    // RTT≈60ms, broadcast≈33ms → error ≈ 3.2 × (30+16)/16.67 ≈ 8.8 px
+                    // Dead zone = 20px: bunu güvenle yut → düz hareket tamamen pürüzsüz.
+                    // 20–80px: gerçek düzeltmeler (çarpışma, freeze, duvar) — 400ms ile yavaş.
+                    // >80px: anında snap.
+                    const authX = me.x, authY = me.y;
                     const errX = authX - __pred.x;
                     const errY = authY - __pred.y;
                     const errLen = Math.hypot(errX, errY);
                     if (errLen > 80) {
                         __pred.x = authX; __pred.y = authY;
-                    } else if (errLen > 14) {
+                    } else if (errLen > 20) {
                         const factor = Math.min(1, dt / 400);
                         __pred.x += errX * factor;
                         __pred.y += errY * factor;
                     }
-                    // errLen ≤ 14: normal network latency kaynaklı steady-state drift → yut
+                    // errLen ≤ 20: network latency kaynaklı drift → yut
                     if (__diag.count < 12) __diag.err.push(errLen);
 
                     // Slide aktifse pred pos'u slide velocity ile ilerlet
