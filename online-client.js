@@ -3095,6 +3095,10 @@
         // (Eski 45ms RTT/2~60ms + 45ms = 105ms; yeni: 60+38 = 98ms görsel gecikme)
         const __INTERP_DELAY_MS = 38;
         let __snapshots = []; // [{t, players: {pid: {x,y,lastDirX,lastDirY}}, ball: {x,y,holder}}]
+        // Ball client-side prediction: pas/şut sonrası top'u server snapshot'larından bağımsız
+        // olarak client physics ile ilerlet. RTT yüksek olduğunda topun "lastikli" görünmesini engeller.
+        // until = 0 ise pasif (interpolation kullanılır)
+        const __ballPredict = { active: false, until: 0, x: 0, y: 0, vx: 0, vy: 0, lastIntegrated: 0 };
         // Input WS: her frame JSON atmak tamponu doldurup bufferedAmount ile drop edilince takılma yapıyordu
         let __inputSendSig = '';
         let __lastInputPacketSentAt = 0;
@@ -3427,6 +3431,22 @@
             __lastFrameAt = now;
             if (__lastFrameAt && __diag.count < 12) __diag.ft.push(dt);
             if (gameStarted && gs && gs.ball && gs.players) {
+                // ─── BALL CLIENT-SIDE PREDICTION ───
+                // Pas/şut sonrası top'u local physics ile ilerlet (RTT yüksek olsa bile lag yok)
+                if (__ballPredict.active) {
+                    if (now >= __ballPredict.until) {
+                        __ballPredict.active = false; // süre doldu → server interpolation'a geri dön
+                    } else {
+                        const dtBall = now - __ballPredict.lastIntegrated;
+                        __ballPredict.lastIntegrated = now;
+                        // Server'ın yaptığı physics'i taklit et: hız azalır, scale 60fps eşdeğeri
+                        const scale = dtBall / (1000 / 60);
+                        __ballPredict.x += __ballPredict.vx * scale;
+                        __ballPredict.y += __ballPredict.vy * scale;
+                        __ballPredict.vx *= Math.pow(0.985, scale);
+                        __ballPredict.vy *= Math.pow(0.985, scale);
+                    }
+                }
                 // ─── INTERPOLATION: rakip + top için pürüzsüz hareket ───
                 // Tek snapshot varsa onu render et (predict sonrası buffer temizlendi)
                 if (__snapshots.length === 1) {
@@ -3441,7 +3461,7 @@
                             gs.players[pid].lastDirY = sp.lastDirY;
                         }
                     });
-                    if (gs.ball.holder !== myPid) {
+                    if (gs.ball.holder !== myPid && !__ballPredict.active) {
                         gs.ball.x = s.ball.x;
                         gs.ball.y = s.ball.y;
                     }
@@ -3472,7 +3492,8 @@
                         }
                     });
                     // Topu da lerp et (kendi topundaysa prediction sonrası bizimle gelir, override etme)
-                    if (gs.ball.holder !== myPid) {
+                    // Ball predict aktifse server pozisyonunu yok say — RTT delay'ini görsel olarak gizler.
+                    if (gs.ball.holder !== myPid && !__ballPredict.active) {
                         gs.ball.x = s0.ball.x + (s1.ball.x - s0.ball.x) * frac;
                         gs.ball.y = s0.ball.y + (s1.ball.y - s0.ball.y) * frac;
                     }
@@ -3576,6 +3597,10 @@
                     if (gs.ball && gs.ball.holder === myPid) {
                         gs.ball.x = me.x + (me.lastDirX || 0) * (me.r * 0.7);
                         gs.ball.y = me.y + (me.lastDirY || 0) * (me.r * 0.7);
+                    } else if (__ballPredict.active && gs.ball) {
+                        // Ball predict aktif: client-side fizik sonucunu render'a yansıt
+                        gs.ball.x = __ballPredict.x;
+                        gs.ball.y = __ballPredict.y;
                     }
                 }
 
@@ -3632,6 +3657,21 @@
                         console.log(
                             `[rtt] avg=${rAvg.toFixed(0)}ms min=${rMin.toFixed(0)}ms max=${rMax.toFixed(0)}ms n=${arr.length}`
                         );
+                        // Ekrana RTT göstergesi: yüksek gecikme oyuncuya görünür olsun
+                        let pingEl = document.getElementById('ping-indicator');
+                        if (!pingEl) {
+                            pingEl = document.createElement('div');
+                            pingEl.id = 'ping-indicator';
+                            pingEl.style.cssText = 'position:fixed;top:8px;right:8px;padding:6px 10px;font:600 12px Inter,sans-serif;border-radius:6px;z-index:9999;pointer-events:none;backdrop-filter:blur(6px);';
+                            document.body.appendChild(pingEl);
+                        }
+                        let color, bg;
+                        if (rAvg < 80) { color = '#7fffa0'; bg = 'rgba(0,40,0,0.55)'; }
+                        else if (rAvg < 150) { color = '#ffdf6b'; bg = 'rgba(60,40,0,0.55)'; }
+                        else { color = '#ff6b6b'; bg = 'rgba(60,0,0,0.65)'; }
+                        pingEl.style.color = color;
+                        pingEl.style.background = bg;
+                        pingEl.textContent = `${Math.round(rAvg)}ms`;
                     }
                     __diag.ft = []; __diag.err = []; __diag.drawMs = []; __diag.snaps = 0;
                     __diag.reportAt = now + 5000;
@@ -3682,6 +3722,16 @@
                     last.ball = { x: b.x, y: b.y, holder: b.holder };
                 }
             };
+            // Ball'u client-side predict modda başlat: belirtilen süre boyunca server snapshot'larını yok say
+            const startBallPredict = (durationMs) => {
+                __ballPredict.active = true;
+                __ballPredict.until = performance.now() + durationMs;
+                __ballPredict.x = b.x;
+                __ballPredict.y = b.y;
+                __ballPredict.vx = b.vx || 0;
+                __ballPredict.vy = b.vy || 0;
+                __ballPredict.lastIntegrated = performance.now();
+            };
 
             if (extra.action === 'pass_press') {
                 if (gs.penaltyMode && gs.penaltyMode.active) return;
@@ -3704,6 +3754,7 @@
                     b.x = me.x + dx * (me.r + BALL_R + 2);
                     b.y = me.y + dy * (me.r + BALL_R + 2);
                     syncBallSnapshot();
+                    startBallPredict(250);
                 }
             } else if (extra.action === 'pass_release') {
                 // Teknik şarjlı pas serbest bırakıldığında lokal fırlat
@@ -3723,6 +3774,7 @@
                     me.passCharging = false;
                     me.passChargeMs = 0;
                     syncBallSnapshot();
+                    startBallPredict(250);
                 }
             } else if (extra.action === 'tackle') {
                 if (gs.penaltyMode || me.slideTimer > 0) return;
@@ -3772,6 +3824,7 @@
                     me.poweredTimer = Math.max(me.poweredTimer || 0, 1200);
                     ab.cdLeft = ab.cd; ab.active = true;
                     syncBallSnapshot();
+                    startBallPredict(250);
                     return;
                 }
                 // Speedboost — anında boost
