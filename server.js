@@ -1767,7 +1767,7 @@ wss.on('connection', (ws, req) => {
       if (p1Ready && p2Ready) room.startGame();
     }
     else if (msg.type === 'ping') {
-      try { ws.send(JSON.stringify({ type: 'pong', t: msg.t })); } catch (_) {}
+      try { ws.send(JSON.stringify({ type: 'pong', t: msg.t, sT: Date.now() })); } catch (_) {}
       return;
     }
     else if (msg.type === 'input') {

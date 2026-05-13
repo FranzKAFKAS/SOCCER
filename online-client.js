@@ -3235,9 +3235,19 @@
                     if (typeof msg.timeLeft === 'number') __initialTimeLeft = msg.timeLeft;
                 } else if (msg.type === 'pong') {
                     const rtt = performance.now() - msg.t;
-                    if (!window.__rttDiag) window.__rttDiag = { samples: [] };
-                    window.__rttDiag.samples.push(rtt);
-                    if (window.__rttDiag.samples.length > 20) window.__rttDiag.samples.shift();
+                    if (!window.__rttDiag) window.__rttDiag = { samples: [], lastSpikeAt: 0 };
+                    const rd = window.__rttDiag;
+                    rd.samples.push(rtt);
+                    if (rd.samples.length > 30) rd.samples.shift();
+                    // Spike anında detaylı log: ne zaman, ne kadar gecikme, sayfa visible mı
+                    if (rtt > 250) {
+                        const visible = document.visibilityState === 'visible';
+                        console.warn(
+                            `[rtt-spike] ${rtt.toFixed(0)}ms` +
+                            ` visible=${visible}` +
+                            ` at=${(performance.now() / 1000).toFixed(1)}s`
+                        );
+                    }
                 } else if (msg.type === 'state') {
                     // Sunucudan zayıf state geldi; eksik alanları statik veriyle doldur
                     const slim = msg.gs;
@@ -3650,14 +3660,18 @@
                     );
                     const rd = window.__rttDiag;
                     if (rd && rd.samples.length) {
-                        const arr = rd.samples;
-                        const rAvg = arr.reduce((a, b) => a + b, 0) / arr.length;
-                        const rMin = Math.min(...arr);
-                        const rMax = Math.max(...arr);
+                        const arr = rd.samples.slice().sort((a, b) => a - b);
+                        const n = arr.length;
+                        const rMin = arr[0];
+                        const rMax = arr[n - 1];
+                        const rMed = arr[Math.floor(n / 2)];
+                        const rP95 = arr[Math.min(n - 1, Math.floor(n * 0.95))];
+                        const spikes = arr.filter(v => v > 200).length;
                         console.log(
-                            `[rtt] avg=${rAvg.toFixed(0)}ms min=${rMin.toFixed(0)}ms max=${rMax.toFixed(0)}ms n=${arr.length}`
+                            `[rtt] median=${rMed.toFixed(0)}ms p95=${rP95.toFixed(0)}ms` +
+                            ` min=${rMin.toFixed(0)}ms max=${rMax.toFixed(0)}ms spikes>200ms=${spikes}/${n}`
                         );
-                        // Ekrana RTT göstergesi: yüksek gecikme oyuncuya görünür olsun
+                        // Ekrana RTT göstergesi (median bazlı, avg değil — spike etkilenmez)
                         let pingEl = document.getElementById('ping-indicator');
                         if (!pingEl) {
                             pingEl = document.createElement('div');
@@ -3666,12 +3680,12 @@
                             document.body.appendChild(pingEl);
                         }
                         let color, bg;
-                        if (rAvg < 80) { color = '#7fffa0'; bg = 'rgba(0,40,0,0.55)'; }
-                        else if (rAvg < 150) { color = '#ffdf6b'; bg = 'rgba(60,40,0,0.55)'; }
+                        if (rMed < 80) { color = '#7fffa0'; bg = 'rgba(0,40,0,0.55)'; }
+                        else if (rMed < 150) { color = '#ffdf6b'; bg = 'rgba(60,40,0,0.55)'; }
                         else { color = '#ff6b6b'; bg = 'rgba(60,0,0,0.65)'; }
                         pingEl.style.color = color;
                         pingEl.style.background = bg;
-                        pingEl.textContent = `${Math.round(rAvg)}ms`;
+                        pingEl.textContent = `${Math.round(rMed)}ms${spikes > 0 ? ` (${spikes} spike)` : ''}`;
                     }
                     __diag.ft = []; __diag.err = []; __diag.drawMs = []; __diag.snaps = 0;
                     __diag.reportAt = now + 5000;
