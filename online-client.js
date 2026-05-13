@@ -3255,7 +3255,28 @@
                         };
                     });
                     __snapshots.push(snap);
-                    if (__snapshots.length > 6) __snapshots.shift();
+                    // Buffer'ı biraz büyüt: 30Hz × 250ms = 7-8 snapshot uygun
+                    if (__snapshots.length > 10) __snapshots.shift();
+
+                    // ─── NETWORK JITTER TEŞHİSİ (ilk 30 sn) ───
+                    // Console'da ortalama snapshot aralığını ve sapmayı görürüz.
+                    // İdeal: avg ≈ 33ms (30Hz), stddev küçük. Stddev büyükse Railway jitter'ı var.
+                    if (!window.__netDiag) window.__netDiag = { samples: [], reportAt: snap.t + 5000, count: 0 };
+                    const nd = window.__netDiag;
+                    if (nd.lastT) nd.samples.push(snap.t - nd.lastT);
+                    nd.lastT = snap.t;
+                    if (snap.t > nd.reportAt && nd.samples.length > 5 && nd.count < 6) {
+                        const arr = nd.samples;
+                        const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+                        const max = Math.max(...arr);
+                        const min = Math.min(...arr);
+                        const variance = arr.reduce((s, v) => s + (v - avg) * (v - avg), 0) / arr.length;
+                        const stddev = Math.sqrt(variance);
+                        console.log(`[net] snap interval avg=${avg.toFixed(1)}ms min=${min.toFixed(0)} max=${max.toFixed(0)} stddev=${stddev.toFixed(1)}ms n=${arr.length}`);
+                        nd.samples = [];
+                        nd.reportAt = snap.t + 5000;
+                        nd.count++;
+                    }
                     if (!document.getElementById('p1-ab-0')) buildHUD();
                     updateHUD(16);
                     if (msg.flashes) msg.flashes.forEach(f => showFlash(f.msg, f.color));
@@ -3383,16 +3404,42 @@
                 const me = gs.players[myPid];
                 if (me) {
                     if (__pred.x === null) { __pred.x = me.x; __pred.y = me.y; }
+
+                    // Reconcile hedefini AĞ JITTER'INDEN TEMİZLE: kendi authoritative pozisyonumu
+                    // da snapshot buffer'ından interpolate et. Aksi halde 30Hz broadcast +
+                    // network jitter ile me.x ~33ms aralıklarla sıçrar, reconcile osile eder →
+                    // "takıla takıla" hissi olur. Self-interp delay opp'tan KISA (15ms) tutuldu:
+                    // input'a anlık tepki gerek; sadece jitter yumuşatması için lerp.
+                    let authX = me.x, authY = me.y;
+                    if (__snapshots.length >= 2) {
+                        const SELF_INTERP_DELAY_MS = 15;
+                        const renderTimeSelf = now - SELF_INTERP_DELAY_MS;
+                        let a = __snapshots[__snapshots.length - 2];
+                        let b = __snapshots[__snapshots.length - 1];
+                        for (let i = 0; i < __snapshots.length - 1; i++) {
+                            if (__snapshots[i].t <= renderTimeSelf && __snapshots[i + 1].t >= renderTimeSelf) {
+                                a = __snapshots[i]; b = __snapshots[i + 1]; break;
+                            }
+                        }
+                        const span = b.t - a.t;
+                        const frac = span > 0 ? Math.max(0, Math.min(1.5, (renderTimeSelf - a.t) / span)) : 1;
+                        const pa = a.players[myPid], pb = b.players[myPid];
+                        if (pa && pb) {
+                            authX = pa.x + (pb.x - pa.x) * frac;
+                            authY = pa.y + (pb.y - pa.y) * frac;
+                        }
+                    }
+
                     // Akıllı reconcile: küçük sapmayı yut, orta yumuşak düzelt, büyük snap.
-                    // Eski sabit 0.18 lerp her frame %18 server'a çekiyordu → "geri gelme" his.
-                    const errX = me.x - __pred.x;
-                    const errY = me.y - __pred.y;
+                    const errX = authX - __pred.x;
+                    const errY = authY - __pred.y;
                     const errLen = Math.hypot(errX, errY);
                     if (errLen > 80) {
-                        __pred.x = me.x; __pred.y = me.y;
+                        __pred.x = authX; __pred.y = authY;
                     } else if (errLen > 3) {
-                        // 220ms zaman sabitli yumuşak düzelt (frame-rate bağımsız)
-                        const factor = Math.min(1, dt / 220);
+                        // 260ms zaman sabitli yumuşak düzelt (frame-rate bağımsız).
+                        // Daha uzun süre → daha az "geri çekme" hissi.
+                        const factor = Math.min(1, dt / 260);
                         __pred.x += errX * factor;
                         __pred.y += errY * factor;
                     }
