@@ -7,7 +7,14 @@
     <title>GridRush — 2 Kişilik Amerikan Futbol Oyunu</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+    <!-- Fontları async yükle: render'ı bloklamasın. display=optional → swap olmaz, CLS biter. -->
+    <link rel="preload" as="style"
+          href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600&display=optional"
+          onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript>
+        <link rel="stylesheet"
+              href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600&display=optional" />
+    </noscript>
     <style>
         * {
             margin: 0;
@@ -1123,7 +1130,12 @@
         }
 
         // ─────────────── HUD BUILD ───────────────
+        // HUD DOM referansları + son durumları cache'le — her frame getElementById ve className yazımını kes
+        let __hudRefs = null;
+        let __hudLast = null;
         function buildHUD() {
+            __hudRefs = { p1: [], p2: [], score: [null, null], timer: null };
+            __hudLast = { p1: [], p2: [], score: ['', ''], timer: '' };
             ['p1', 'p2'].forEach(pid => {
                 const el = document.getElementById(`${pid}-abilities`);
                 el.innerHTML = '';
@@ -1138,31 +1150,52 @@
         <div class="ability-label">[${ab.key}]</div>
       `;
                     el.appendChild(pip);
+                    __hudRefs[pid].push({
+                        icon: pip.querySelector('.ability-icon'),
+                        fill: pip.querySelector('.cooldown-fill'),
+                    });
+                    __hudLast[pid].push({ pct: -1, cls: '' });
                 });
             });
+            __hudRefs.score[0] = document.getElementById('score-p1');
+            __hudRefs.score[1] = document.getElementById('score-p2');
+            __hudRefs.timer = document.getElementById('timer-display');
         }
 
         function updateHUD(dt) {
-            ['p1', 'p2'].forEach(pid => {
-                gs.players[pid].abilities.forEach((ab, i) => {
-                    const fill = document.getElementById(`${pid}-ab-cd-${i}`);
-                    const icon = document.getElementById(`${pid}-ab-${i}`);
-                    if (!fill || !icon) return;
+            if (!__hudRefs) return;
+            for (const pid of ['p1', 'p2']) {
+                const abs = gs.players[pid].abilities;
+                const refs = __hudRefs[pid];
+                const last = __hudLast[pid];
+                for (let i = 0; i < abs.length; i++) {
+                    const ab = abs[i];
+                    const ref = refs[i];
+                    if (!ref) continue;
+                    // Cooldown bar height — 1% deadband ile yaz, gereksiz reflow yapma
                     const pct = ab.cdLeft > 0 ? (ab.cdLeft / ab.cd) * 100 : 0;
-                    fill.style.height = pct + '%';
-                    icon.className = 'ability-icon' + (ab.cdLeft <= 0 ? ' ready' : '') + (ab.active ? ' active' : '');
-                });
-            });
-
-            document.getElementById('score-p1').textContent = gs.score[0];
-            document.getElementById('score-p2').textContent = gs.score[1];
-            if (typeof gs.timeLeft === 'number') {
-                const td = document.getElementById('timer-display');
-                if (td) {
-                    const m = Math.floor(gs.timeLeft / 60).toString().padStart(2, '0');
-                    const s = (gs.timeLeft % 60).toString().padStart(2, '0');
-                    td.textContent = `${m}:${s}`;
+                    const pctRounded = Math.round(pct);
+                    if (pctRounded !== last[i].pct) {
+                        ref.fill.style.height = pctRounded + '%';
+                        last[i].pct = pctRounded;
+                    }
+                    // className — sadece DEĞİŞİNCE yaz (bu en pahalı kısımdı)
+                    const cls = 'ability-icon' + (ab.cdLeft <= 0 ? ' ready' : '') + (ab.active ? ' active' : '');
+                    if (cls !== last[i].cls) {
+                        ref.icon.className = cls;
+                        last[i].cls = cls;
+                    }
                 }
+            }
+            const s0 = String(gs.score[0]);
+            const s1 = String(gs.score[1]);
+            if (s0 !== __hudLast.score[0]) { __hudRefs.score[0].textContent = s0; __hudLast.score[0] = s0; }
+            if (s1 !== __hudLast.score[1]) { __hudRefs.score[1].textContent = s1; __hudLast.score[1] = s1; }
+            if (typeof gs.timeLeft === 'number' && __hudRefs.timer) {
+                const m = Math.floor(gs.timeLeft / 60).toString().padStart(2, '0');
+                const s = (gs.timeLeft % 60).toString().padStart(2, '0');
+                const t = m + ':' + s;
+                if (t !== __hudLast.timer) { __hudRefs.timer.textContent = t; __hudLast.timer = t; }
             }
         }
 

@@ -1,4 +1,5 @@
 const express = require('express');
+const compression = require('compression');
 const { WebSocketServer, WebSocket } = require('ws');
 const http = require('http');
 const path = require('path');
@@ -8,18 +9,23 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// HTML/JS değişikliklerinin tarayıcıda anında görünmesi için cache devre dışı.
+// Gzip/Deflate: 200 KB inline HTML'i ~30 KB'a indirir, TTFB transfer süresini ciddi düşürür.
+app.use(compression({ threshold: 1024 }));
+
+// HTML için cache yok (canlı düzenleme); statik varlıklar (woff2/png/js) için kısa cache izni veriyoruz.
 app.use((req, res, next) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.set('Pragma', 'no-cache');
-  res.set('Expires', '0');
+  if (req.path === '/' || /\.html?$/i.test(req.path)) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
   next();
 });
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'indextoonline.html'));
 });
 app.get('/favicon.ico', (req, res) => res.status(204).end());
-app.use(express.static(path.join(__dirname), { etag: false, lastModified: false, maxAge: 0 }));
+app.use(express.static(path.join(__dirname), { etag: true, lastModified: true, maxAge: '1h' }));
 // 404 yerine bilinmeyen yolları ana online sayfaya yönlendir (kullanıcı SPA gibi gezsin)
 app.use((req, res) => {
   if (req.method === 'GET' && req.accepts('html')) {
