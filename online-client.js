@@ -3099,6 +3099,9 @@
         // olarak client physics ile ilerlet. RTT yüksek olduğunda topun "lastikli" görünmesini engeller.
         // until = 0 ise pasif (interpolation kullanılır)
         const __ballPredict = { active: false, until: 0, x: 0, y: 0, vx: 0, vy: 0, lastIntegrated: 0 };
+        // Predict bitince sunucu interp'ine sert geçiş → top "ışınlanır". Kısa handoff ile yumuşat.
+        let __ballHandoffUntil = 0;
+        let __ballVisX = NaN, __ballVisY = NaN;
         // Input WS: her frame JSON atmak tamponu doldurup bufferedAmount ile drop edilince takılma yapıyordu
         let __inputSendSig = '';
         let __lastInputPacketSentAt = 0;
@@ -3447,7 +3450,10 @@
                 // Client da AYNI katsayıyı kullanmalı yoksa predict bitince ışınlanma olur.
                 if (__ballPredict.active) {
                     if (now >= __ballPredict.until) {
-                        __ballPredict.active = false; // süre doldu → server interpolation'a geri dön
+                        __ballPredict.active = false;
+                        __ballHandoffUntil = now + 220;
+                        __ballVisX = __ballPredict.x;
+                        __ballVisY = __ballPredict.y;
                     } else {
                         const dtBall = now - __ballPredict.lastIntegrated;
                         __ballPredict.lastIntegrated = now;
@@ -3459,8 +3465,32 @@
                         __ballPredict.vy *= Math.pow(0.93, scale);
                     }
                 }
-                // ─── INTERPOLATION: rakip + top için pürüzsüz hareket ───
-                // Tek snapshot varsa onu render et (predict sonrası buffer temizlendi)
+                // Sunucu top interp hedefi (predict/handoff sırasında da hesapla — sert kesmeyi önler)
+                let ballIx = NaN, ballIy = NaN;
+                if (gs.ball.holder !== myPid && __snapshots.length >= 1) {
+                    if (__snapshots.length === 1) {
+                        const s = __snapshots[0];
+                        ballIx = s.ball.x;
+                        ballIy = s.ball.y;
+                    } else {
+                        const renderTime = now - __INTERP_DELAY_MS;
+                        let s0 = __snapshots[0], s1 = __snapshots[1];
+                        for (let i = 0; i < __snapshots.length - 1; i++) {
+                            if (__snapshots[i].t <= renderTime && __snapshots[i + 1].t >= renderTime) {
+                                s0 = __snapshots[i]; s1 = __snapshots[i + 1]; break;
+                            }
+                        }
+                        if (renderTime > __snapshots[__snapshots.length - 1].t) {
+                            s0 = __snapshots[__snapshots.length - 2];
+                            s1 = __snapshots[__snapshots.length - 1];
+                        }
+                        const span = s1.t - s0.t;
+                        const frac = span > 0 ? Math.max(0, Math.min(1.2, (renderTime - s0.t) / span)) : 1;
+                        ballIx = s0.ball.x + (s1.ball.x - s0.ball.x) * frac;
+                        ballIy = s0.ball.y + (s1.ball.y - s0.ball.y) * frac;
+                    }
+                }
+                // ─── INTERPOLATION: rakip için pürüzsüz hareket (top ayrı, yukarıdaki ballIx/y) ───
                 if (__snapshots.length === 1) {
                     const s = __snapshots[0];
                     Object.keys(gs.players).forEach(pid => {
@@ -3473,10 +3503,6 @@
                             gs.players[pid].lastDirY = sp.lastDirY;
                         }
                     });
-                    if (gs.ball.holder !== myPid && !__ballPredict.active) {
-                        gs.ball.x = s.ball.x;
-                        gs.ball.y = s.ball.y;
-                    }
                 } else if (__snapshots.length >= 2) {
                     const renderTime = now - __INTERP_DELAY_MS;
                     let s0 = __snapshots[0], s1 = __snapshots[1];
@@ -3485,14 +3511,12 @@
                             s0 = __snapshots[i]; s1 = __snapshots[i + 1]; break;
                         }
                     }
-                    // Eğer renderTime son snapshot'tan sonraysa son ikiyi kullan (kısa extrapolation)
                     if (renderTime > __snapshots[__snapshots.length - 1].t) {
                         s0 = __snapshots[__snapshots.length - 2];
                         s1 = __snapshots[__snapshots.length - 1];
                     }
                     const span = s1.t - s0.t;
                     const frac = span > 0 ? Math.max(0, Math.min(1.2, (renderTime - s0.t) / span)) : 1;
-                    // Rakip oyuncuyu lerp ile yumuşat (kendi karaktere dokunma — prediction var)
                     Object.keys(gs.players).forEach(pid => {
                         if (pid === myPid) return;
                         const a = s0.players[pid], b = s1.players[pid];
@@ -3503,11 +3527,23 @@
                             gs.players[pid].lastDirY = a.lastDirY + (b.lastDirY - a.lastDirY) * frac;
                         }
                     });
-                    // Topu da lerp et (kendi topundaysa prediction sonrası bizimle gelir, override etme)
-                    // Ball predict aktifse server pozisyonunu yok say — RTT delay'ini görsel olarak gizler.
-                    if (gs.ball.holder !== myPid && !__ballPredict.active) {
-                        gs.ball.x = s0.ball.x + (s1.ball.x - s0.ball.x) * frac;
-                        gs.ball.y = s0.ball.y + (s1.ball.y - s0.ball.y) * frac;
+                }
+                // Top görseli: predict → handoff (exp smooth) → doğrudan interp
+                if (gs.ball.holder !== myPid && isFinite(ballIx) && isFinite(ballIy)) {
+                    if (__ballPredict.active) {
+                        gs.ball.x = __ballPredict.x;
+                        gs.ball.y = __ballPredict.y;
+                    } else if (now < __ballHandoffUntil) {
+                        const k = 1 - Math.exp(-dt / 72);
+                        __ballVisX += (ballIx - __ballVisX) * k;
+                        __ballVisY += (ballIy - __ballVisY) * k;
+                        gs.ball.x = __ballVisX;
+                        gs.ball.y = __ballVisY;
+                    } else {
+                        gs.ball.x = ballIx;
+                        gs.ball.y = ballIy;
+                        __ballVisX = ballIx;
+                        __ballVisY = ballIy;
                     }
                 }
 
@@ -3609,10 +3645,6 @@
                     if (gs.ball && gs.ball.holder === myPid) {
                         gs.ball.x = me.x + (me.lastDirX || 0) * (me.r * 0.7);
                         gs.ball.y = me.y + (me.lastDirY || 0) * (me.r * 0.7);
-                    } else if (__ballPredict.active && gs.ball) {
-                        // Ball predict aktif: client-side fizik sonucunu render'a yansıt
-                        gs.ball.x = __ballPredict.x;
-                        gs.ball.y = __ballPredict.y;
                     }
                 }
 
@@ -3749,6 +3781,7 @@
                     rttEst = sorted[Math.floor(sorted.length / 2)]; // median (spike'lardan korunaklı)
                 }
                 const dur = Math.max(defaultDuration, Math.min(400, rttEst * 1.25 + 60));
+                __ballHandoffUntil = 0;
                 __ballPredict.active = true;
                 __ballPredict.until = performance.now() + dur;
                 __ballPredict.x = b.x;
