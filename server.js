@@ -1766,6 +1766,10 @@ wss.on('connection', (ws, req) => {
       const p2Ready = (room.selectedSkills.p2 || []).length > 0 && room.profiles.p2;
       if (p1Ready && p2Ready) room.startGame();
     }
+    else if (msg.type === 'ping') {
+      try { ws.send(JSON.stringify({ type: 'pong', t: msg.t })); } catch (_) {}
+      return;
+    }
     else if (msg.type === 'input') {
       const room = rooms.get(ws.roomId);
       if (!room || !room.started) return;

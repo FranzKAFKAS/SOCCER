@@ -3089,9 +3089,11 @@
         const __PRED_SPEED = 3.2; // PLAYER_SPEED ile aynı
         // Interpolation: rakip + top için son 2 sunucu snapshot'ı arasında lerp
         // Sunucu 60Hz state yolluyor; ufak tampon paket gecikmelerini absorbe eder
-        // Network stddev=0.7ms (mükemmel) olduğunda 45ms yeterli:
-        // en kötü paket ~35ms, +10ms güvenlik payı → extrapolation riski yok, lag daha az.
-        const __INTERP_DELAY_MS = 45;
+        // Network stddev=0.7ms olduğundan minimum buffer yeter.
+        // 30Hz broadcast → interval=33ms. Jitter çok düşük olduğu için 33ms+küçük pay yeterli.
+        // Bu, rakip ve top'un görsel gecikmesini ~105ms → ~95ms'e düşürür.
+        // (Eski 45ms RTT/2~60ms + 45ms = 105ms; yeni: 60+38 = 98ms görsel gecikme)
+        const __INTERP_DELAY_MS = 38;
         let __snapshots = []; // [{t, players: {pid: {x,y,lastDirX,lastDirY}}, ball: {x,y,holder}}]
         // Input WS: her frame JSON atmak tamponu doldurup bufferedAmount ile drop edilince takılma yapıyordu
         let __inputSendSig = '';
@@ -3176,6 +3178,12 @@
                 const em = document.getElementById('error-msg');
                 if (em) em.textContent = '';
                 console.log('[WS] bağlandı');
+                if (window.__pingInterval) clearInterval(window.__pingInterval);
+                window.__pingInterval = setInterval(() => {
+                    if (socket && socket.readyState === 1) {
+                        try { socket.send(JSON.stringify({ type: 'ping', t: performance.now() })); } catch (_) {}
+                    }
+                }, 1000);
             };
             socket.onerror = (e) => {
                 console.error('[WS] hata', e);
@@ -3221,6 +3229,11 @@
                     // Statik veriyi sakla (color/team/profile/abilities tanımı) — her tick'te tekrar gelmiyor
                     __playerStatic = msg.players || {};
                     if (typeof msg.timeLeft === 'number') __initialTimeLeft = msg.timeLeft;
+                } else if (msg.type === 'pong') {
+                    const rtt = performance.now() - msg.t;
+                    if (!window.__rttDiag) window.__rttDiag = { samples: [] };
+                    window.__rttDiag.samples.push(rtt);
+                    if (window.__rttDiag.samples.length > 20) window.__rttDiag.samples.shift();
                 } else if (msg.type === 'state') {
                     // Sunucudan zayıf state geldi; eksik alanları statik veriyle doldur
                     const slim = msg.gs;
@@ -3610,6 +3623,16 @@
                     console.log(
                         `[draw] avg=${dAvg.toFixed(2)}ms max=${dMax.toFixed(1)}ms`
                     );
+                    const rd = window.__rttDiag;
+                    if (rd && rd.samples.length) {
+                        const arr = rd.samples;
+                        const rAvg = arr.reduce((a, b) => a + b, 0) / arr.length;
+                        const rMin = Math.min(...arr);
+                        const rMax = Math.max(...arr);
+                        console.log(
+                            `[rtt] avg=${rAvg.toFixed(0)}ms min=${rMin.toFixed(0)}ms max=${rMax.toFixed(0)}ms n=${arr.length}`
+                        );
+                    }
                     __diag.ft = []; __diag.err = []; __diag.drawMs = []; __diag.snaps = 0;
                     __diag.reportAt = now + 5000;
                     __diag.count++;
