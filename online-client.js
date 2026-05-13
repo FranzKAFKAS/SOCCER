@@ -3099,9 +3099,8 @@
         // olarak client physics ile ilerlet. RTT yüksek olduğunda topun "lastikli" görünmesini engeller.
         // until = 0 ise pasif (interpolation kullanılır)
         const __ballPredict = { active: false, until: 0, x: 0, y: 0, vx: 0, vy: 0, lastIntegrated: 0 };
-        // Pas sonrası top: rakip için 38ms interp gerekli ama kendi pasında topu "geride" göstermek lag hissi verir.
-        let __ballPassSnapUntil = 0; // bu süre boyunca top interp için daha az gecikme (≈10ms)
         let __ballHandoffUntil = 0;
+        // Interpolation: rakip + top için son 2 sunucu snapshot'ı arasında lerp
         let __ballVisX = NaN, __ballVisY = NaN;
         // Input WS: her frame JSON atmak tamponu doldurup bufferedAmount ile drop edilince takılma yapıyordu
         let __inputSendSig = '';
@@ -3475,9 +3474,8 @@
                         ballIx = s.ball.x;
                         ballIy = s.ball.y;
                     } else {
-                        // Pas sonrası top: 0ms gecikmeyle render (en yeni snapshot extrapolasyona izinli).
-                        // Rakip oyuncuya yakınlıkta jitter olmasın diye yine sınırlı.
-                        const ballDelay = (now < __ballPassSnapUntil) ? 0 : __INTERP_DELAY_MS;
+                        // Top: diğer serbest toplarla aynı interp gecikmesi (uzun pas ile aynı yol)
+                        const ballDelay = __INTERP_DELAY_MS;
                         const renderTimeBall = now - ballDelay;
                         let s0 = __snapshots[0], s1 = __snapshots[1];
                         for (let i = 0; i < __snapshots.length - 1; i++) {
@@ -3779,7 +3777,7 @@
             // Ball'u client-side predict modda başlat: süre RTT'ye göre dinamik
             // Hedef: server snapshot'larının "pas işlendi" state'i client'a ulaşana kadar predict
             // = RTT (input→server→broadcast→client) + küçük güvenlik payı
-            const startBallPredict = (defaultDuration, opts = {}) => {
+            const startBallPredict = (defaultDuration) => {
                 const rd = window.__rttDiag;
                 let rttEst = 150;
                 if (rd && rd.samples.length) {
@@ -3787,9 +3785,6 @@
                     rttEst = sorted[Math.floor(sorted.length / 2)]; // median (spike'lardan korunaklı)
                 }
                 const dur = Math.max(defaultDuration, Math.min(400, rttEst * 1.25 + 60));
-                if (opts.ballSnapPass) {
-                    __ballPassSnapUntil = performance.now() + 700;
-                }
                 __ballHandoffUntil = 0;
                 __ballPredict.active = true;
                 __ballPredict.until = performance.now() + dur;
@@ -3821,7 +3816,7 @@
                     b.x = me.x + dx * (me.r + BALL_R + 2);
                     b.y = me.y + dy * (me.r + BALL_R + 2);
                     syncBallSnapshot();
-                    startBallPredict(250, { ballSnapPass: true });
+                    // Uzun pas / şut gibi: client-side ball predict yok — top sadece sunucu snapshot interp (daha tutarlı)
                 }
             } else if (extra.action === 'pass_release') {
                 // Teknik şarjlı pas serbest bırakıldığında lokal fırlat
@@ -3841,7 +3836,6 @@
                     me.passCharging = false;
                     me.passChargeMs = 0;
                     syncBallSnapshot();
-                    startBallPredict(250, { ballSnapPass: true });
                 }
             } else if (extra.action === 'tackle') {
                 if (gs.penaltyMode || me.slideTimer > 0) return;
