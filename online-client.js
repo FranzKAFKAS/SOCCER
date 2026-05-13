@@ -3086,6 +3086,7 @@
         let __initialTimeLeft = 180;
         // Client-side prediction: kendi karakterin için lokal pozisyon — input lag'i öldürür
         let __pred = { x: null, y: null, lastDirX: 1, lastDirY: 0, lastInputAt: 0 };
+        let __prevErrLen = 0; // ani sıçrama tespiti için
         const __PRED_SPEED = 3.2; // PLAYER_SPEED ile aynı
         // Interpolation: rakip + top için son 2 sunucu snapshot'ı arasında lerp
         // Sunucu 60Hz state yolluyor; ufak tampon paket gecikmelerini absorbe eder
@@ -3397,6 +3398,7 @@
             ft: [],          // frame times
             err: [],         // errLen per frame (prediction vs server)
             drawMs: [],      // drawField+players+ball süresi
+            snaps: 0,        // ani sıçrama snap sayısı (skill/pas)
             reportAt: 0,
             count: 0,
         };
@@ -3475,22 +3477,27 @@
                     // karıştırıyordu → errLen şişiyordu → reconcile her frame'de geri çekiyordu.
                     //
                     // Beklenen steady-state error = speed × (RTT/2 + broadcast_interval/2) / tick_ms
-                    // RTT≈60ms, broadcast≈33ms → error ≈ 3.2 × (30+16)/16.67 ≈ 8.8 px
-                    // Dead zone = 20px: bunu güvenle yut → düz hareket tamamen pürüzsüz.
-                    // 20–80px: gerçek düzeltmeler (çarpışma, freeze, duvar) — 400ms ile yavaş.
-                    // >80px: anında snap.
+                    // Dead zone = 28px: RTT~125ms one-way steady-state drift'i tamamen yut.
+                    // 28–80px: skill/pas/çarpışma düzeltmesi — errLen büyüdükçe TC hızlanır.
+                    // >80px veya ani sıçrama (errLen >= 2× prev ve > 35px): anında snap.
                     const authX = me.x, authY = me.y;
                     const errX = authX - __pred.x;
                     const errY = authY - __pred.y;
                     const errLen = Math.hypot(errX, errY);
-                    if (errLen > 80) {
+                    const suddenJump = errLen > 35 && errLen > __prevErrLen * 2;
+                    __prevErrLen = errLen;
+                    if (errLen > 80 || suddenJump) {
                         __pred.x = authX; __pred.y = authY;
-                    } else if (errLen > 20) {
-                        const factor = Math.min(1, dt / 400);
+                        __diag.snaps++;
+                    } else if (errLen > 28) {
+                        // 28px → TC=400ms, 80px → TC=50ms (lineer interpolasyon)
+                        const urgency = Math.min(1, (errLen - 28) / 52);
+                        const tc = 400 - urgency * 350;
+                        const factor = Math.min(1, dt / tc);
                         __pred.x += errX * factor;
                         __pred.y += errY * factor;
                     }
-                    // errLen ≤ 20: network latency kaynaklı drift → yut
+                    // errLen ≤ 28: steady-state RTT drift → yut
                     if (__diag.count < 12) __diag.err.push(errLen);
 
                     // Slide aktifse pred pos'u slide velocity ile ilerlet
@@ -3590,7 +3597,8 @@
                     const errArr = __diag.err;
                     const errAvg = errArr.length ? errArr.reduce((a, b) => a + b, 0) / errArr.length : 0;
                     const errMax = errArr.length ? Math.max(...errArr) : 0;
-                    const errOver14 = errArr.filter(v => v > 14).length;
+                    const errOver28 = errArr.filter(v => v > 28).length;
+                    const snapCount = __diag.snaps;
 
                     const dArr = __diag.drawMs;
                     const dAvg = dArr.length ? dArr.reduce((a, b) => a + b, 0) / dArr.length : 0;
@@ -3602,12 +3610,12 @@
                     );
                     console.log(
                         `[pred] errAvg=${errAvg.toFixed(1)}px errMax=${errMax.toFixed(0)}px` +
-                        ` reconcileActivations=${errOver14}/${errArr.length}`
+                        ` reconcile>28px=${errOver28}/${errArr.length} snaps=${snapCount}`
                     );
                     console.log(
                         `[draw] avg=${dAvg.toFixed(2)}ms max=${dMax.toFixed(1)}ms`
                     );
-                    __diag.ft = []; __diag.err = []; __diag.drawMs = [];
+                    __diag.ft = []; __diag.err = []; __diag.drawMs = []; __diag.snaps = 0;
                     __diag.reportAt = now + 5000;
                     __diag.count++;
                 }
