@@ -2536,6 +2536,8 @@
             // draw identical-looking balls at each clone position
             ['p1', 'p2'].forEach(pid => {
                 const p = gs.players[pid];
+                // Online: klonu atan oyuncu sahte topları görmez; rakip gerçek+klonlarda top görür
+                if (gameStarted && pid === myPid) return;
                 if (b.holder === pid && p.clones && p.clones.length > 0) {
                     p.clones.forEach(c => {
                         const cx = c.x + p.lastDirX * (PLAYER_R * 0.7);
@@ -2666,10 +2668,35 @@
             });
         }
 
+        /** Online maçta takım eşleşmesi (sis / kör). Yerelde gameStarted=false → sadece pid eşitliği. */
+        function onlineSameTeam(pidA, pidB) {
+            if (!gameStarted || !gs || !gs.players || !pidA || !pidB) return pidA === pidB;
+            const pa = gs.players[pidA], pb = gs.players[pidB];
+            if (!pa || !pb) return pidA === pidB;
+            return (pa.team || pidA) === (pb.team || pidB);
+        }
+
         function drawSmokeZones() {
             gs.smokeZones.forEach(z => {
                 ctx.save();
                 const lifeAlpha = Math.min(1, z.life / 800);
+                // Online: sis atan takım alanı içini görebilir; rakip yoğun sis görür
+                const allySmokeView = gameStarted && z.owner && onlineSameTeam(z.owner, myPid);
+                if (allySmokeView) {
+                    ctx.globalAlpha = Math.min(0.22, 0.08 + lifeAlpha * 0.12);
+                    ctx.fillStyle = 'rgba(240, 240, 255, 0.35)';
+                    ctx.beginPath();
+                    ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = Math.min(0.5, 0.25 + lifeAlpha * 0.2);
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                    return;
+                }
                 for (let i = 0; i < 6; i++) {
                     const angle = (i / 6) * Math.PI * 2 + Date.now() * 0.001 + i;
                     const ox = Math.cos(angle) * (z.radius * 0.25);
@@ -3317,6 +3344,7 @@
                         smokeProjectiles: slim.smokeProjectiles || [],
                         tackleCooldown: slim.tackleCooldown || 0,
                         blindTimer: slim.blindTimer || 0,
+                        blindOwner: slim.blindOwner != null ? slim.blindOwner : null,
                         invisBallTimer: slim.invisBallTimer || 0,
                     });
                     // Snapshot timestamp olarak performance.now() kullan.
@@ -3664,6 +3692,13 @@
                 updateParticles();
                 drawParticles();
                 drawPenaltyBar();
+                // Online: kör etme sadece rakip takıma; atan takım normal görüş
+                if (gs.blindTimer > 0 && gs.blindOwner && !onlineSameTeam(myPid, gs.blindOwner)) {
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(0,0,0,0.96)';
+                    ctx.fillRect(0, 0, W, H);
+                    ctx.restore();
+                }
                 if (__diag.count < 12) __diag.drawMs.push(performance.now() - _t0draw);
                 sendSocketInput();
 
