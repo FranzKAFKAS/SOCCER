@@ -3456,7 +3456,9 @@
                         __ballPredict.active = false;
                         __ballPredict.fromPass = false;
                         __ballHandoffFast = wasPass;
-                        __ballHandoffUntil = now + (wasPass ? 105 : 185);
+                        // Pas: predict kısa kesildi → server pozisyonu hâlâ yetişiyor; uzun yumuşak handoff
+                        // ile geri sıçramayı görünmez yap. Selfpass için kısa handoff yeter.
+                        __ballHandoffUntil = now + (wasPass ? 320 : 185);
                         __ballVisX = __ballPredict.x;
                         __ballVisY = __ballPredict.y;
                     } else {
@@ -3478,7 +3480,9 @@
                         ballIx = s.ball.x;
                         ballIy = s.ball.y;
                     } else {
-                        const ballDelay = (now < __ballPassSnapUntil) ? 10 : __INTERP_DELAY_MS;
+                        // Pas sonrası top: 0ms gecikmeyle render (en yeni snapshot extrapolasyona izinli).
+                        // Rakip oyuncuya yakınlıkta jitter olmasın diye yine sınırlı.
+                        const ballDelay = (now < __ballPassSnapUntil) ? 0 : __INTERP_DELAY_MS;
                         const renderTimeBall = now - ballDelay;
                         let s0 = __snapshots[0], s1 = __snapshots[1];
                         for (let i = 0; i < __snapshots.length - 1; i++) {
@@ -3540,7 +3544,9 @@
                         gs.ball.x = __ballPredict.x;
                         gs.ball.y = __ballPredict.y;
                     } else if (now < __ballHandoffUntil) {
-                        const tau = __ballHandoffFast ? 42 : 70;
+                        // fromPass: tau=110ms (uzun, yumuşak) — predict bitince server yetişene kadar smooth blend
+                        // diğer: tau=70 (orta yumuşaklık)
+                        const tau = __ballHandoffFast ? 110 : 70;
                         const k = 1 - Math.exp(-dt / tau);
                         __ballVisX += (ballIx - __ballVisX) * k;
                         __ballVisY += (ballIy - __ballVisY) * k;
@@ -3788,11 +3794,19 @@
                     const sorted = rd.samples.slice().sort((a, b) => a - b);
                     rttEst = sorted[Math.floor(sorted.length / 2)]; // median (spike'lardan korunaklı)
                 }
-                const dur = Math.max(defaultDuration, Math.min(400, rttEst * 1.25 + 60));
+                // Pas: predict'i kısa tut (RTT/2 + safety). Pas hızı 10–37 px/frame, uzun predict
+                // bitince mesafe çok büyük olur → handoff'ta ışınlanma. Kısa predict + uzun handoff
+                // ile server snapshot'ı predict timeline'ı zaten yakalamış olur.
+                let dur;
+                if (opts.fromPass) {
+                    dur = Math.max(90, Math.min(220, rttEst * 0.6 + 30));
+                    __ballPassSnapUntil = performance.now() + 700;
+                } else {
+                    dur = Math.max(defaultDuration, Math.min(400, rttEst * 1.25 + 60));
+                }
                 __ballHandoffUntil = 0;
                 __ballPredict.active = true;
                 __ballPredict.fromPass = !!opts.fromPass;
-                if (opts.fromPass) __ballPassSnapUntil = performance.now() + 520;
                 __ballPredict.until = performance.now() + dur;
                 __ballPredict.x = b.x;
                 __ballPredict.y = b.y;
