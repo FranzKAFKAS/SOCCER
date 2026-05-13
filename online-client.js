@@ -314,6 +314,7 @@
             gs.blindTimer = 0;
             gs.blindOwner = null;
             gs.invisBallTimer = 0;
+            gs.invisBallOwner = null;
             gs.walls = [];
         }
 
@@ -651,6 +652,7 @@
             else if (ab.id === 'invisball') {
                 ab.active = true; ab.cdLeft = ab.cd;
                 gs.invisBallTimer = ab.duration;
+                gs.invisBallOwner = pid;
                 spawnParticles(p.x, p.y, '#aaa', 15, 3);
                 showFlash('👻 GÖRÜNMEZ TOP!', '#aaa');
             }
@@ -2156,6 +2158,7 @@
             gs.blindTimer = 0;
             gs.blindOwner = null;
             gs.invisBallTimer = 0;
+            gs.invisBallOwner = null;
             gs.walls = [];
         }
 
@@ -2452,8 +2455,11 @@
         function drawBall() {
             const b = gs.ball;
 
-            // Görünmez top: çizimi atla
-            if (gs.invisBallTimer > 0) return;
+            // Görünmez top: online'da sadece rakip görmez; atan takım görür. Yerelde herkes görmez.
+            if (gs.invisBallTimer > 0) {
+                if (!gameStarted) return;
+                if (!gs.invisBallOwner || !onlineSameTeam(myPid, gs.invisBallOwner)) return;
+            }
 
             ctx.save();
 
@@ -2811,7 +2817,13 @@
         // ─────────────── GLOBAL EFFECTS ───────────────
         function updateEffects(dt) {
             if (gs.blindTimer > 0) gs.blindTimer -= dt;
-            if (gs.invisBallTimer > 0) gs.invisBallTimer -= dt;
+            if (gs.invisBallTimer > 0) {
+                gs.invisBallTimer -= dt;
+                if (gs.invisBallTimer <= 0) {
+                    gs.invisBallTimer = 0;
+                    gs.invisBallOwner = null;
+                }
+            }
             if (gs.walls && gs.walls.length) {
                 gs.walls.forEach(w => { w.life -= dt; });
                 gs.walls = gs.walls.filter(w => w.life > 0);
@@ -3346,6 +3358,7 @@
                         blindTimer: slim.blindTimer || 0,
                         blindOwner: slim.blindOwner != null ? slim.blindOwner : null,
                         invisBallTimer: slim.invisBallTimer || 0,
+                        invisBallOwner: (slim.invisBallTimer > 0 && slim.invisBallOwner != null) ? slim.invisBallOwner : null,
                     });
                     // Snapshot timestamp olarak performance.now() kullan.
                     // Server-time mapping deneyleri (min-offset tracking) snapshot buffer'ında

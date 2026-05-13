@@ -224,7 +224,7 @@ class Room {
       penaltyMode: null,
       walls: [],
       blindTimer: 0, blindOwner: null,
-      invisBallTimer: 0,
+      invisBallTimer: 0, invisBallOwner: null,
       ball: {
         x: W / 2, y: H / 2, vx: 0, vy: 0,
         holder: null, inAir: false,
@@ -389,6 +389,7 @@ class Room {
       case 'invisball': {
         ab.active = true; ab.cdLeft = ab.cd;
         this.gs.invisBallTimer = ab.duration;
+        this.gs.invisBallOwner = pid;
         this.addFlash('👻 GÖRÜNMEZ TOP!', '#aaa');
         break;
       }
@@ -1462,7 +1463,13 @@ class Room {
   // ─────────────── EFFECTS ───────────────
   updateEffects(dt) {
     if (this.gs.blindTimer > 0) this.gs.blindTimer -= dt;
-    if (this.gs.invisBallTimer > 0) this.gs.invisBallTimer -= dt;
+    if (this.gs.invisBallTimer > 0) {
+      this.gs.invisBallTimer -= dt;
+      if (this.gs.invisBallTimer <= 0) {
+        this.gs.invisBallTimer = 0;
+        this.gs.invisBallOwner = null;
+      }
+    }
     if (this.gs.walls && this.gs.walls.length) {
       this.gs.walls.forEach(w => { w.life -= dt; });
       this.gs.walls = this.gs.walls.filter(w => w.life > 0);
@@ -1514,6 +1521,7 @@ class Room {
     this.gs.penaltyMode = null;
     this.gs.blindTimer = 0; this.gs.blindOwner = null;
     this.gs.invisBallTimer = 0;
+    this.gs.invisBallOwner = null;
     this.gs.walls = [];
   }
 
@@ -1595,7 +1603,10 @@ class Room {
     if (this.gs.walls && this.gs.walls.length) slim.walls = this.gs.walls;
     if (this.gs.penaltyMode) slim.penaltyMode = this.gs.penaltyMode;
     if (this.gs.blindTimer > 0) { slim.blindTimer = Math.round(this.gs.blindTimer); slim.blindOwner = this.gs.blindOwner; }
-    if (this.gs.invisBallTimer > 0) slim.invisBallTimer = Math.round(this.gs.invisBallTimer);
+    if (this.gs.invisBallTimer > 0) {
+      slim.invisBallTimer = Math.round(this.gs.invisBallTimer);
+      slim.invisBallOwner = this.gs.invisBallOwner;
+    }
     // Server timestamp: client interpolation timeline'ı bunu kullanır.
     // Network burst halinde paketler aynı anda gelse bile original 33ms aralık korunur.
     const payload = { type: 'state', gs: slim, t: Date.now() };
