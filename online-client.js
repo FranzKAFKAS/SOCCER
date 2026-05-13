@@ -3086,7 +3086,6 @@
         let __initialTimeLeft = 180;
         // Client-side prediction: kendi karakterin için lokal pozisyon — input lag'i öldürür
         let __pred = { x: null, y: null, lastDirX: 1, lastDirY: 0, lastInputAt: 0 };
-        let __prevErrLen = 0; // ani sıçrama tespiti için
         const __PRED_SPEED = 3.2; // PLAYER_SPEED ile aynı
         // Interpolation: rakip + top için son 2 sunucu snapshot'ı arasında lerp
         // Sunucu 60Hz state yolluyor; ufak tampon paket gecikmelerini absorbe eder
@@ -3477,27 +3476,23 @@
                     // karıştırıyordu → errLen şişiyordu → reconcile her frame'de geri çekiyordu.
                     //
                     // Beklenen steady-state error = speed × (RTT/2 + broadcast_interval/2) / tick_ms
-                    // Dead zone = 28px: RTT~125ms one-way steady-state drift'i tamamen yut.
-                    // 28–80px: skill/pas/çarpışma düzeltmesi — errLen büyüdükçe TC hızlanır.
-                    // >80px veya ani sıçrama (errLen >= 2× prev ve > 35px): anında snap.
+                    // Sürekli yumuşak düzeltme: hiçbir eşik yok, "rubber band" yok.
+                    // Her frame errLen × (dt/TC) kadar pred → auth'a yaklaşır.
+                    // TC=220ms: 18px steady-state error'da düzeltme 18×(16.67/220)=1.36px/frame
+                    // → görünmez. Skill/pas spike'larında smooth yaklaşma.
+                    // >150px: gerçek desync (respawn, freeze bitişi) → hard snap.
                     const authX = me.x, authY = me.y;
                     const errX = authX - __pred.x;
                     const errY = authY - __pred.y;
                     const errLen = Math.hypot(errX, errY);
-                    const suddenJump = errLen > 65 && errLen > __prevErrLen * 2;
-                    __prevErrLen = errLen;
-                    if (errLen > 80 || suddenJump) {
+                    if (errLen > 150) {
                         __pred.x = authX; __pred.y = authY;
                         __diag.snaps++;
-                    } else if (errLen > 28) {
-                        // 28px → TC=400ms, 80px → TC=50ms (lineer interpolasyon)
-                        const urgency = Math.min(1, (errLen - 28) / 52);
-                        const tc = 400 - urgency * 350;
-                        const factor = Math.min(1, dt / tc);
+                    } else {
+                        const factor = Math.min(1, dt / 220);
                         __pred.x += errX * factor;
                         __pred.y += errY * factor;
                     }
-                    // errLen ≤ 28: steady-state RTT drift → yut
                     if (__diag.count < 12) __diag.err.push(errLen);
 
                     // Slide aktifse pred pos'u slide velocity ile ilerlet
