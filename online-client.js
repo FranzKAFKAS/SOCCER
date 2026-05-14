@@ -18,6 +18,13 @@
         }
         updateFieldBounds();
 
+        /** Takım A (sol / mavi): p1 veya a* pid — çok oyunculu online ile uyumlu */
+        function pidTeamLeft(pid) {
+            if (!pid) return true;
+            const s = String(pid);
+            return s === 'p1' || s.charAt(0) === 'a';
+        }
+
         // ── Offscreen field cache ────────────────────────────────────────────────
         // drawField() statik zemin+çizgiler+kale kısmı her frame sıfırdan çiziliyor:
         //   1 LinearGradient + ~10 stroke + arc + 2 text + border = pahalı.
@@ -323,8 +330,40 @@
         let __hudRefs = null;
         let __hudLast = null;
         function buildHUD() {
-            __hudRefs = { p1: [], p2: [], score: [null, null], timer: null };
+            __hudRefs = { p1: [], p2: [], score: [null, null], timer: null, mode: 'dual' };
             __hudLast = { p1: [], p2: [], score: ['', ''], timer: '' };
+            const arenaMulti = gameStarted && gs && gs.players && myPid && onlineArenaMultiPid();
+            if (arenaMulti) {
+                __hudRefs.mode = 'solo';
+                const domPid = onlinePidTeamKey(myPid) === 'a' ? 'p1' : 'p2';
+                const hidePid = domPid === 'p1' ? 'p2' : 'p1';
+                document.getElementById(`${hidePid}-abilities`).innerHTML = '';
+                const el = document.getElementById(`${domPid}-abilities`);
+                el.innerHTML = '';
+                const mePl = gs.players[myPid];
+                (mePl && mePl.abilities ? mePl.abilities : []).forEach((ab, i) => {
+                    const pip = document.createElement('div');
+                    pip.className = 'ability-pip';
+                    pip.innerHTML = `
+        <div class="ability-icon" id="${domPid}-ab-${i}">
+          <span style="position:relative;z-index:1">${ab.icon}</span>
+          <div class="cooldown-fill" id="${domPid}-ab-cd-${i}"></div>
+        </div>
+        <div class="ability-label">[${ab.key}]</div>
+      `;
+                    el.appendChild(pip);
+                    __hudRefs[domPid].push({
+                        icon: pip.querySelector('.ability-icon'),
+                        fill: pip.querySelector('.cooldown-fill'),
+                    });
+                    __hudLast[domPid].push({ pct: -1, cls: '' });
+                });
+                __hudRefs._soloDom = domPid;
+                __hudRefs.score[0] = document.getElementById('score-p1');
+                __hudRefs.score[1] = document.getElementById('score-p2');
+                __hudRefs.timer = document.getElementById('timer-display');
+                return;
+            }
             ['p1', 'p2'].forEach(pid => {
                 const el = document.getElementById(`${pid}-abilities`);
                 el.innerHTML = '';
@@ -353,26 +392,47 @@
 
         function updateHUD(dt) {
             if (!__hudRefs) return;
-            for (const pid of ['p1', 'p2']) {
-                const abs = gs.players[pid].abilities;
-                const refs = __hudRefs[pid];
-                const last = __hudLast[pid];
+            if (__hudRefs.mode === 'solo' && myPid && gs.players[myPid]) {
+                const domPid = __hudRefs._soloDom;
+                const abs = gs.players[myPid].abilities;
+                const refs = __hudRefs[domPid];
+                const last = __hudLast[domPid];
                 for (let i = 0; i < abs.length; i++) {
                     const ab = abs[i];
                     const ref = refs[i];
                     if (!ref) continue;
-                    // Cooldown bar height — 1% deadband ile yaz, gereksiz reflow yapma
                     const pct = ab.cdLeft > 0 ? (ab.cdLeft / ab.cd) * 100 : 0;
                     const pctRounded = Math.round(pct);
                     if (pctRounded !== last[i].pct) {
                         ref.fill.style.height = pctRounded + '%';
                         last[i].pct = pctRounded;
                     }
-                    // className — sadece DEĞİŞİNCE yaz (bu en pahalı kısımdı)
                     const cls = 'ability-icon' + (ab.cdLeft <= 0 ? ' ready' : '') + (ab.active ? ' active' : '');
                     if (cls !== last[i].cls) {
                         ref.icon.className = cls;
                         last[i].cls = cls;
+                    }
+                }
+            } else {
+                for (const pid of ['p1', 'p2']) {
+                    const abs = gs.players[pid].abilities;
+                    const refs = __hudRefs[pid];
+                    const last = __hudLast[pid];
+                    for (let i = 0; i < abs.length; i++) {
+                        const ab = abs[i];
+                        const ref = refs[i];
+                        if (!ref) continue;
+                        const pct = ab.cdLeft > 0 ? (ab.cdLeft / ab.cd) * 100 : 0;
+                        const pctRounded = Math.round(pct);
+                        if (pctRounded !== last[i].pct) {
+                            ref.fill.style.height = pctRounded + '%';
+                            last[i].pct = pctRounded;
+                        }
+                        const cls = 'ability-icon' + (ab.cdLeft <= 0 ? ' ready' : '') + (ab.active ? ' active' : '');
+                        if (cls !== last[i].cls) {
+                            ref.icon.className = cls;
+                            last[i].cls = cls;
+                        }
                     }
                 }
             }
@@ -1059,7 +1119,7 @@
             if (!pm || !pm.active || pm.shot) return;
 
             // Opponent's tackle key speeds up the bar
-            const oppKey = pm.keeper === 'p1' ? 'KeyF' : 'KeyL';
+            const oppKey = pidTeamLeft(pm.keeper) ? 'KeyF' : 'KeyL';
             const isHolding = keys[oppKey];
 
             const targetSpeed = isHolding ? pm.baseSpeed * 4 : pm.baseSpeed;
@@ -1983,7 +2043,7 @@
             if (gs.penaltyMode && gs.penaltyMode.shot && gs.penaltyMode.active) {
                 const pm = gs.penaltyMode;
                 // If ball crossed the goal line
-                const crossed = pm.keeper === 'p1' ? (b.x < pm.goalX) : (b.x > pm.goalX);
+                const crossed = pidTeamLeft(pm.keeper) ? (b.x < pm.goalX) : (b.x > pm.goalX);
                 if (crossed) {
                     const hit = Math.abs(b.y - pm.goalY) < pm.goalH / 2;
                     if (hit) {
@@ -2203,26 +2263,26 @@
                 ctx.lineWidth = 5;
                 // Crossbar
                 ctx.beginPath();
-                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy - gh / 2);
-                ctx.lineTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy + gh / 2);
+                ctx.moveTo(pidTeamLeft(pm.keeper) ? gx - 20 : gx + 20, gy - gh / 2);
+                ctx.lineTo(pidTeamLeft(pm.keeper) ? gx - 20 : gx + 20, gy + gh / 2);
                 ctx.stroke();
                 // Top post
                 ctx.beginPath();
-                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy - gh / 2);
-                ctx.lineTo(pm.keeper === 'p1' ? gx - 40 : gx + 40, gy - gh / 2 - 30);
+                ctx.moveTo(pidTeamLeft(pm.keeper) ? gx - 20 : gx + 20, gy - gh / 2);
+                ctx.lineTo(pidTeamLeft(pm.keeper) ? gx - 40 : gx + 40, gy - gh / 2 - 30);
                 ctx.stroke();
                 // Bottom post
                 ctx.beginPath();
-                ctx.moveTo(pm.keeper === 'p1' ? gx - 20 : gx + 20, gy + gh / 2);
-                ctx.lineTo(pm.keeper === 'p1' ? gx - 40 : gx + 40, gy + gh / 2 + 30);
+                ctx.moveTo(pidTeamLeft(pm.keeper) ? gx - 20 : gx + 20, gy + gh / 2);
+                ctx.lineTo(pidTeamLeft(pm.keeper) ? gx - 40 : gx + 40, gy + gh / 2 + 30);
                 ctx.stroke();
                 // Fill zone
                 ctx.globalAlpha = 0.15 * pulse;
                 ctx.fillStyle = '#ffaa00';
                 ctx.fillRect(
-                    pm.keeper === 'p1' ? FIELD_LEFT : gx,
+                    pidTeamLeft(pm.keeper) ? FIELD_LEFT : gx,
                     gy - gh / 2,
-                    pm.keeper === 'p1' ? gx - FIELD_LEFT : FIELD_RIGHT - gx,
+                    pidTeamLeft(pm.keeper) ? gx - FIELD_LEFT : FIELD_RIGHT - gx,
                     gh
                 );
                 ctx.globalAlpha = 1;
@@ -2291,7 +2351,7 @@
             (gs.walls || []).forEach(w => {
                 const x = w.side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
                 const seg = wallSegmentBounds(w.pos);
-                const color = w.owner === 'p1' ? '#00d4ff' : '#ff4d6d';
+                const color = pidTeamLeft(w.owner) ? '#00d4ff' : '#ff4d6d';
                 const lifeAlpha = Math.min(1, w.life / 1500);
                 const wW = 14;
                 ctx.save();
@@ -2321,13 +2381,13 @@
                 ctx.stroke();
                 ctx.restore();
             });
-            ['p1', 'p2'].forEach(pid => {
+            Object.keys(gs.players).forEach(pid => {
                 const p = gs.players[pid];
                 if (!p || !p.wallPreview || !p.wallPreview.active) return;
-                const side = (p.team || pid) === 'p1' ? 'left' : 'right';
+                const side = pidTeamLeft(p.team || pid) ? 'left' : 'right';
                 const x = side === 'left' ? PLAY_LEFT : PLAY_RIGHT;
                 const seg = wallSegmentBounds(p.wallPreview.pos);
-                const color = pid === 'p1' ? '#00d4ff' : '#ff4d6d';
+                const color = pidTeamLeft(pid) ? '#00d4ff' : '#ff4d6d';
                 const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 180);
                 const wW = 18;
                 ctx.save();
@@ -2377,7 +2437,7 @@
             // Slide trail
             if (slideTimer > 0) {
                 ctx.globalAlpha = 0.4;
-                ctx.fillStyle = pid === 'p1' ? '#aa00ff' : '#ff88bb';
+                ctx.fillStyle = pidTeamLeft(pid) ? '#aa00ff' : '#ff88bb';
                 ctx.beginPath(); ctx.arc(x - slideVx * 3, y - slideVy * 3, r * 0.7, 0, Math.PI * 2); ctx.fill();
                 ctx.globalAlpha = 0.2;
                 ctx.beginPath(); ctx.arc(x - slideVx * 6, y - slideVy * 6, r * 0.5, 0, Math.PI * 2); ctx.fill();
@@ -2478,21 +2538,12 @@
             const lobScale = b.lobMode ? (1 + 0.5 * Math.sin(b.lobProgress * Math.PI)) : 1;
             const effectiveR = BALL_R * lobScale;
 
-            if (b.holder === 'p1') {
-                // Pulsing ownership ring
+            if (b.holder && gs.players[b.holder]) {
                 const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
-                ctx.shadowColor = '#00d4ff';
+                const col = gs.players[b.holder].color || (pidTeamLeft(b.holder) ? '#00d4ff' : '#ff4d6d');
+                ctx.shadowColor = col;
                 ctx.shadowBlur = 18 * pulse;
-                ctx.strokeStyle = '#00d4ff';
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, effectiveR + 4, 0, Math.PI * 2);
-                ctx.stroke();
-            } else if (b.holder === 'p2') {
-                const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
-                ctx.shadowColor = '#ff4d6d';
-                ctx.shadowBlur = 18 * pulse;
-                ctx.strokeStyle = '#ff4d6d';
+                ctx.strokeStyle = col;
                 ctx.lineWidth = 3;
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, effectiveR + 4, 0, Math.PI * 2);
@@ -2540,8 +2591,9 @@
 
             // Decoy balls on clones: if player holds the ball and has clones,
             // draw identical-looking balls at each clone position
-            ['p1', 'p2'].forEach(pid => {
+            Object.keys(gs.players).forEach(pid => {
                 const p = gs.players[pid];
+                if (!p) return;
                 // Online: klonu atan oyuncu sahte topları görmez; rakip gerçek+klonlarda top görür
                 if (gameStarted && pid === myPid) return;
                 if (b.holder === pid && p.clones && p.clones.length > 0) {
@@ -2615,8 +2667,9 @@
                 ctx.restore();
             }
             // Active pulling rope
-            ['p1', 'p2'].forEach(pid => {
+            Object.keys(gs.players).forEach(pid => {
                 const p = gs.players[pid];
+                if (!p) return;
                 if (p.pullingTimer > 0 && p.pulledBy) {
                     const owner = gs.players[p.pulledBy];
                     ctx.save();
@@ -2748,12 +2801,12 @@
             ctx.fill();
 
             // Title
-            const kickerColor = pm.kicker === 'p1' ? '#00d4ff' : '#ff4d6d';
+            const kickerColor = pidTeamLeft(pm.kicker) ? '#00d4ff' : '#ff4d6d';
             ctx.fillStyle = kickerColor;
             ctx.font = 'bold 13px Orbitron, monospace';
             ctx.textAlign = 'center';
             ctx.fillText(
-                (pm.kicker === 'p1' ? '🔵 P1' : '🔴 P2') + ' PENALTİ — Vurmak için [SPACE] bas!',
+                (pidTeamLeft(pm.kicker) ? '🔵 P1' : '🔴 P2') + ' PENALTİ — Vurmak için [SPACE] bas!',
                 W / 2, BAR_Y - 14
             );
 
@@ -2803,11 +2856,11 @@
             ctx.stroke();
 
             // Fouler hint
-            const foulerKey = pm.keeper === 'p1' ? 'F' : 'L';
+            const foulerKey = pidTeamLeft(pm.keeper) ? 'F' : 'L';
             ctx.fillStyle = 'rgba(255,100,100,0.8)';
             ctx.font = '11px Orbitron, monospace';
             ctx.fillText(
-                '⚡ ' + (pm.keeper === 'p1' ? 'P1' : 'P2') + ': [' + foulerKey + '] bas → hızı artır!',
+                '⚡ ' + (pidTeamLeft(pm.keeper) ? 'P1' : 'P2') + ': [' + foulerKey + '] bas → hızı artır!',
                 W / 2, BAR_Y + BAR_H + 18
             );
 
@@ -3114,6 +3167,7 @@
             document.getElementById('waiting-room').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
             document.getElementById('error-msg').textContent = '';
+            __onlineSkillSelectionShown = false;
         }
 
         // --- ONLINE LOGIC ---
@@ -3121,6 +3175,32 @@
         let socket, myPid, myRoomId, allSkills = [], gameStarted = false;
         let myTeam = 'p1', onlineMaxPlayers = 2;
         let onlineTeamSize = 1;
+
+        function onlinePidTeamKey(pid) {
+            return pidTeamLeft(pid) ? 'a' : 'b';
+        }
+        function nearestOnlineOpponentPid(ctxGs, mePid) {
+            const me = ctxGs.players[mePid];
+            if (!me) return null;
+            const mt = onlinePidTeamKey(mePid);
+            let best = null, bd = 1e9;
+            Object.keys(ctxGs.players).forEach(oid => {
+                if (oid === mePid || onlinePidTeamKey(oid) === mt) return;
+                const o = ctxGs.players[oid];
+                const d = Math.hypot(o.x - me.x, o.y - me.y);
+                if (d < bd) { bd = d; best = oid; }
+            });
+            return best;
+        }
+        function tacklePredictOppPid(ctxGs, mePid) {
+            const b = ctxGs.ball;
+            const mt = onlinePidTeamKey(mePid);
+            if (b && b.holder && b.holder !== mePid && onlinePidTeamKey(b.holder) !== mt) return b.holder;
+            return nearestOnlineOpponentPid(ctxGs, mePid);
+        }
+        function onlineArenaMultiPid() {
+            return myPid && /^[ab]\d+$/.test(String(myPid));
+        }
         let __playerStatic = null;          // game_init ile gelen statik oyuncu verisi (color/abilities tanımı/profile)
         let __initialTimeLeft = 180;
         // Client-side prediction: kendi karakterin için lokal pozisyon — input lag'i öldürür
@@ -3177,40 +3257,61 @@
             __onlineSkillSelectionShown = true;
             document.getElementById('waiting-room').style.display = 'none';
             document.getElementById('lobby').style.display = 'none';
-            // skill-selection-overlay game-wrapper'ın içinde — parent'ı görünür yap ki overlay çizilebilsin
             document.getElementById('game-wrapper').style.display = 'flex';
             document.getElementById('skill-selection-overlay').classList.remove('hidden');
             initSkillSelection();
-            // Rakibin tarafını devre dışı bırak — sadece kendi profilini seç
-            const otherPid = myPid === 'p1' ? 'p2' : 'p1';
-            const otherPanel = document.querySelector('.' + otherPid + '-selection');
-            if (otherPanel) {
-                otherPanel.style.pointerEvents = 'none';
-                otherPanel.style.opacity = '0.55';
-                const h3 = otherPanel.querySelector('h3');
-                if (h3 && !h3.textContent.includes('RAKİP')) h3.textContent += ' (RAKİP SEÇİYOR)';
+
+            const multi = onlineArenaMultiPid();
+            const p1Panel = document.querySelector('.p1-selection');
+            const p2Panel = document.querySelector('.p2-selection');
+            const container = document.querySelector('.selection-container');
+            if (multi && p1Panel && p2Panel && container) {
+                p2Panel.style.display = 'none';
+                p1Panel.style.display = 'flex';
+                p1Panel.style.flex = '1';
+                p1Panel.style.maxWidth = '560px';
+                container.style.maxWidth = '600px';
+                const h3 = p1Panel.querySelector('h3');
+                if (h3) h3.textContent = onlinePidTeamKey(myPid) === 'a' ? '🔵 SEN (TAKIM A)' : '🔴 SEN (TAKIM B)';
+                p1Panel.style.pointerEvents = 'auto';
+                p1Panel.style.opacity = '1';
+            } else if (p1Panel && p2Panel && container) {
+                p2Panel.style.display = '';
+                p1Panel.style.display = '';
+                p1Panel.style.flex = '';
+                p1Panel.style.maxWidth = '';
+                container.style.maxWidth = '820px';
+                const otherPid = myPid === 'p1' ? 'p2' : 'p1';
+                const otherPanel = document.querySelector('.' + otherPid + '-selection');
+                if (otherPanel) {
+                    otherPanel.style.pointerEvents = 'none';
+                    otherPanel.style.opacity = '0.55';
+                    const h3 = otherPanel.querySelector('h3');
+                    if (h3 && !h3.textContent.includes('RAKİP')) h3.textContent += ' (RAKİP SEÇİYOR)';
+                }
             }
+
+            const skillDomPid = multi ? 'p1' : myPid;
             const btn = document.getElementById('confirm-skills-btn');
             let __mySkillsSent = false;
             btn.onclick = () => {
                 if (__mySkillsSent) return;
-                const myProfile = myPid === 'p1' ? p1Profile : p2Profile;
-                const mySkills = myPid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+                const myProfile = multi ? p1Profile : (myPid === 'p1' ? p1Profile : p2Profile);
+                const mySkills = multi ? p1SelectedSkills : (myPid === 'p1' ? p1SelectedSkills : p2SelectedSkills);
                 if (!myProfile || !mySkills.length) return;
                 socket.send(JSON.stringify({ type: 'select_skills', skills: mySkills, profile: myProfile }));
                 __mySkillsSent = true;
-                btn.textContent = 'RAKİP BEKLENİYOR...';
+                btn.textContent = 'DİĞER OYUNCULAR BEKLENİYOR...';
                 btn.disabled = true;
-                // Kendi tarafını da düzenlemeyi engelle
-                const myPanel = document.querySelector('.' + myPid + '-selection');
+                const myPanel = document.querySelector('.' + skillDomPid + '-selection');
                 if (myPanel) myPanel.style.pointerEvents = 'none';
             };
             updateSkillSelectionUI = (function (orig) {
                 return function () {
                     orig();
                     if (__mySkillsSent) { btn.disabled = true; return; }
-                    const myProfile = myPid === 'p1' ? p1Profile : p2Profile;
-                    const mySkills = myPid === 'p1' ? p1SelectedSkills : p2SelectedSkills;
+                    const myProfile = multi ? p1Profile : (myPid === 'p1' ? p1Profile : p2Profile);
+                    const mySkills = multi ? p1SelectedSkills : (myPid === 'p1' ? p1SelectedSkills : p2SelectedSkills);
                     const need = myProfile ? myProfile.slots : 99;
                     btn.disabled = (!myProfile || mySkills.length < need);
                 };
@@ -3249,19 +3350,38 @@
                 if (msg.type === 'room_created') {
                     myPid = msg.pid; myRoomId = msg.roomId; allSkills = msg.allSkills;
                     myTeam = myPid;
+                    if (typeof msg.teamSize === 'number') onlineTeamSize = msg.teamSize;
+                    onlineMaxPlayers = msg.maxPlayers || onlineTeamSize * 2;
                     document.getElementById('lobby').style.display = 'none';
                     const wr = document.getElementById('waiting-room');
                     wr.style.display = 'flex';
                     document.getElementById('display-room-code').textContent = myRoomId;
-                    document.getElementById('waiting-status').textContent = 'Rakip bekleniyor... (1/2)';
+                    const st = document.getElementById('waiting-status');
+                    if (st) st.textContent = 'Oyuncular: ' + (msg.playerCount || 1) + '/' + onlineMaxPlayers + ' — aynı mod (1v1 / 2v2 / 3v3) ile katılın';
                 } else if (msg.type === 'room_joined') {
                     myPid = msg.pid; myRoomId = msg.roomId; allSkills = msg.allSkills;
                     myTeam = myPid;
-                    // İkinci oyuncu odaya girdiğinde her iki tarafa skill seçimini aç
-                    showOnlineSkillSelection();
+                    if (typeof msg.teamSize === 'number') onlineTeamSize = msg.teamSize;
+                    onlineMaxPlayers = msg.maxPlayers || onlineTeamSize * 2;
+                    const max = onlineMaxPlayers;
+                    const cnt = msg.playerCount != null ? msg.playerCount : max;
+                    const full = msg.roomFull === true || (msg.roomFull === undefined && cnt >= max);
+                    if (!full) {
+                        document.getElementById('lobby').style.display = 'none';
+                        const wr = document.getElementById('waiting-room');
+                        wr.style.display = 'flex';
+                        document.getElementById('display-room-code').textContent = msg.roomId;
+                    }
+                    const st = document.getElementById('waiting-status');
+                    if (st) st.textContent = 'Oyuncular: ' + cnt + '/' + max + (full ? '' : ' — bekleyin');
+                    if (full) showOnlineSkillSelection();
                 } else if (msg.type === 'opponent_joined') {
-                    // Birinci oyuncu için skill seçim ekranı
-                    showOnlineSkillSelection();
+                    const max = msg.maxPlayers != null ? msg.maxPlayers : onlineMaxPlayers;
+                    const cnt = msg.playerCount != null ? msg.playerCount : max;
+                    const st = document.getElementById('waiting-status');
+                    if (st) st.textContent = 'Oyuncular: ' + cnt + '/' + max;
+                    const full = msg.roomFull === true || (msg.roomFull === undefined && cnt >= max);
+                    if (full) showOnlineSkillSelection();
                 } else if (msg.type === 'start') {
                     document.getElementById('skill-selection-overlay').classList.add('hidden');
                     document.getElementById('waiting-room').style.display = 'none';
@@ -3297,7 +3417,7 @@
                     Object.keys(slim.players || {}).forEach(pid => {
                         const sp = slim.players[pid];
                         const stat = (__playerStatic && __playerStatic[pid]) || {};
-                        const keyCodes = pid === 'p1' ? ['KeyQ', 'KeyE', 'KeyR', 'KeyT'] : ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
+                        const keyCodes = onlinePidTeamKey(pid) === 'a' ? ['KeyQ', 'KeyE', 'KeyR', 'KeyT'] : ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
                         // Yetenekleri statik tanım + dinamik c/a ile birleştir
                         const abFull = (sp.abilities || []).map((ab, i) => {
                             const statAb = (stat.abilities && stat.abilities[i]) || {};
@@ -3400,13 +3520,26 @@
                         nd.reportAt = snap.t + 5000;
                         nd.count++;
                     }
-                    if (!document.getElementById('p1-ab-0')) buildHUD();
+                    const needHud = (() => {
+                        if (!gameStarted || !myPid) return !document.getElementById('p1-ab-0');
+                        if (onlineArenaMultiPid()) {
+                            const dom = pidTeamLeft(myPid) ? 'p1' : 'p2';
+                            return !document.getElementById(`${dom}-ab-0`);
+                        }
+                        return !document.getElementById('p1-ab-0');
+                    })();
+                    if (needHud) buildHUD();
                     updateHUD(16);
                     if (msg.flashes) msg.flashes.forEach(f => showFlash(f.msg, f.color));
                 } else if (msg.type === 'gameover') {
                     document.getElementById('overlay').classList.remove('hidden');
                     const w = msg.winner;
-                    document.getElementById('overlay').querySelector('h2').textContent = w === myPid ? 'KAZANDIN!' : (w === 'draw' ? 'BERABERE!' : 'KAYBETTİN');
+                    const mySide = onlinePidTeamKey(myPid);
+                    let title;
+                    if (w === 'draw') title = 'BERABERE!';
+                    else if (w === 'a' || w === 'b') title = (w === mySide) ? 'KAZANDIN!' : 'KAYBETTİN';
+                    else title = w === myPid ? 'KAZANDIN!' : 'KAYBETTİN';
+                    document.getElementById('overlay').querySelector('h2').textContent = title;
                     if (msg.score) {
                         const sub = document.getElementById('overlay').querySelector('.subtitle');
                         if (sub) sub.textContent = 'Skor: ' + msg.score[0] + ' — ' + msg.score[1];
@@ -3433,9 +3566,9 @@
             let penaltyBarBoost = false;
             const pm = gs.penaltyMode;
             if (pm && pm.active && !pm.shot && pm.keeper === myPid) {
-                penaltyBarBoost = !!(myPid === 'p1' ? keys['KeyF'] : keys['KeyL']);
+                penaltyBarBoost = !!(pidTeamLeft(myPid) ? keys['KeyF'] : keys['KeyL']);
                 if (!penaltyBarBoost && navigator.getGamepads) {
-                    const gpIdx = myPid === 'p1' ? 0 : 1;
+                    const gpIdx = pidTeamLeft(myPid) ? 0 : 1;
                     const gp = navigator.getGamepads()[gpIdx];
                     if (gp && gp.connected && gp.buttons[2] && gp.buttons[2].pressed) penaltyBarBoost = true;
                 }
@@ -3447,7 +3580,7 @@
                 const wallAb = me.abilities && me.abilities.find(a => a.id === 'wall');
                 if (wallAb && wallAb.key && keys[wallAb.key]) wallHeld = true;
                 if (!wallHeld && navigator.getGamepads) {
-                    const gpIdx = myPid === 'p1' ? 0 : 1;
+                    const gpIdx = pidTeamLeft(myPid) ? 0 : 1;
                     const gp = navigator.getGamepads()[gpIdx];
                     const ABILITY_GAMEPAD_BUTTONS = [4, 5, 3, 1];
                     if (gp && gp.connected && wallAb) {
@@ -3652,7 +3785,7 @@
                         if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
                         if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
                         if (navigator.getGamepads) {
-                            const gpIdx = myPid === 'p1' ? 0 : 1;
+                            const gpIdx = pidTeamLeft(myPid) ? 0 : 1;
                             const gp = navigator.getGamepads()[gpIdx];
                             if (gp && gp.connected) {
                                 if (Math.abs(gp.axes[0]) > 0.2) dx += gp.axes[0];
@@ -3823,8 +3956,8 @@
             if (!gs || !gs.players) return;
             const me = gs.players[myPid];
             if (!me || me.frozenTimer > 0) return;
-            const oppPid = myPid === 'p1' ? 'p2' : 'p1';
-            const opp = gs.players[oppPid];
+            const oppPid = tacklePredictOppPid(gs, myPid);
+            const opp = oppPid ? gs.players[oppPid] : null;
             const b = gs.ball;
             if (!b) return;
 
@@ -3953,7 +4086,7 @@
                 // Klon — sunucu ile aynı deterministik yön + __pred; anında görünür, sunucu ile hizalı
                 if (ab.id === 'clone') {
                     ab.cdLeft = ab.cd; ab.active = true;
-                    const goUp = myPid === 'p1';
+                    const goUp = pidTeamLeft(myPid);
                     const realDY = goUp ? -72 : 72;
                     const px = (__pred.x != null && Number.isFinite(__pred.x)) ? __pred.x : me.x;
                     const py = (__pred.y != null && Number.isFinite(__pred.y)) ? __pred.y : me.y;
@@ -3985,43 +4118,47 @@
             if (!gameStarted) return;
             if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
             if (e.repeat) return;
-            const list = myPid === 'p1' ? ABILITY_KEYS_P1 : ABILITY_KEYS_P2;
+            const list = pidTeamLeft(myPid) ? ABILITY_KEYS_P1 : ABILITY_KEYS_P2;
             const idx = list.indexOf(e.code);
             if (idx >= 0) {
                 sendAction({ action: 'ability_press', idx });
                 return;
             }
-            if ((myPid === 'p1' && e.code === 'Space') || (myPid === 'p2' && (e.code === 'Space' || e.code === 'Enter'))) {
+            if ((pidTeamLeft(myPid) && e.code === 'Space') || (!pidTeamLeft(myPid) && (e.code === 'Space' || e.code === 'Enter'))) {
                 sendAction({ action: 'pass_press' });
             }
-            if ((myPid === 'p1' && e.code === 'KeyF') || (myPid === 'p2' && e.code === 'KeyL')) {
+            if ((pidTeamLeft(myPid) && e.code === 'KeyF') || (!pidTeamLeft(myPid) && e.code === 'KeyL')) {
                 sendAction({ action: 'tackle' });
             }
         });
 
         window.addEventListener('keyup', e => {
             if (!gameStarted) return;
-            const list = myPid === 'p1' ? ABILITY_KEYS_P1 : ABILITY_KEYS_P2;
+            const list = pidTeamLeft(myPid) ? ABILITY_KEYS_P1 : ABILITY_KEYS_P2;
             const idx = list.indexOf(e.code);
             if (idx >= 0) {
                 sendAction({ action: 'ability_release', idx });
                 return;
             }
-            if ((myPid === 'p1' && e.code === 'Space') || (myPid === 'p2' && (e.code === 'Space' || e.code === 'Enter'))) {
+            if ((pidTeamLeft(myPid) && e.code === 'Space') || (!pidTeamLeft(myPid) && (e.code === 'Space' || e.code === 'Enter'))) {
                 sendAction({ action: 'pass_release' });
             }
         });
 
         // ─────────── GAMEPAD INPUT (yerel oyunla aynı buton düzeni) ───────────
         const ABILITY_GAMEPAD_BUTTONS = [4, 5, 3, 1]; // LB, RB, Y/Triangle, B/Circle
-        const __gpPrev = { p1: { a: [false, false, false, false], pass: false, tackle: false }, p2: { a: [false, false, false, false], pass: false, tackle: false } };
+        const __gpPrev = {};
+        function __getGpPrev() {
+            if (!__gpPrev[myPid]) __gpPrev[myPid] = { a: [false, false, false, false], pass: false, tackle: false };
+            return __gpPrev[myPid];
+        }
         function pollOnlineGamepad() {
             if (!gameStarted || !navigator.getGamepads) return;
-            const gpIdx = myPid === 'p1' ? 0 : 1;
+            const gpIdx = pidTeamLeft(myPid) ? 0 : 1;
             const gps = navigator.getGamepads();
             const gp = gps && gps[gpIdx];
             if (!gp || !gp.connected) return;
-            const prev = __gpPrev[myPid];
+            const prev = __getGpPrev();
             for (let i = 0; i < ABILITY_GAMEPAD_BUTTONS.length; i++) {
                 const btn = gp.buttons[ABILITY_GAMEPAD_BUTTONS[i]];
                 const now = !!(btn && btn.pressed);
@@ -4048,7 +4185,7 @@
             if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
             if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
             const gps = navigator.getGamepads ? navigator.getGamepads() : null;
-            const gpIdx = myPid === 'p1' ? 0 : 1;
+            const gpIdx = pidTeamLeft(myPid) ? 0 : 1;
             const gp = gps && gps[gpIdx];
             if (gp && gp.connected) {
                 let gpX = 0, gpY = 0, usingAnalog = false;
@@ -4064,7 +4201,7 @@
             let penaltyBarBoost = false;
             const pm = gs && gs.penaltyMode;
             if (pm && pm.active && !pm.shot && pm.keeper === myPid) {
-                penaltyBarBoost = !!(myPid === 'p1' ? keys['KeyF'] : keys['KeyL']);
+                penaltyBarBoost = !!(pidTeamLeft(myPid) ? keys['KeyF'] : keys['KeyL']);
                 if (!penaltyBarBoost && gp && gp.connected && gp.buttons[2] && gp.buttons[2].pressed) penaltyBarBoost = true;
             }
             let wallHeld = false;

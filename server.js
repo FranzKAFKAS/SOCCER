@@ -103,6 +103,35 @@ const PROFILES = [
   { id: 'ofansif', name: 'Ofansif', icon: '🔥', color: '#ff4400', skills: ['selfpass', 'smoke', 'clone', 'shot'], slots: 3 },
 ];
 
+/** 1v1: p1/p2 — 2v2/3v3: a0,b0,a1,b1,... (sıra: ev sahibi takım A doldukça B ile nötrler) */
+function slotOrderForTeamSize(n) {
+  if (n === 1) return ['p1', 'p2'];
+  const o = [];
+  for (let i = 0; i < n; i++) {
+    o.push('a' + i);
+    o.push('b' + i);
+  }
+  return o;
+}
+function pidTeamKey(pid) {
+  if (pid === 'p1' || (typeof pid === 'string' && pid.charAt(0) === 'a')) return 'a';
+  if (pid === 'p2' || (typeof pid === 'string' && pid.charAt(0) === 'b')) return 'b';
+  return 'a';
+}
+function pidSlotIndex(pid) {
+  if (pid === 'p1' || pid === 'p2') return 0;
+  const m = /^[ab](\d+)$/.exec(pid || '');
+  return m ? +m[1] : 0;
+}
+function teamSpreadY(teamSize, slotIdx) {
+  if (teamSize <= 1) return 0;
+  const gap = 58;
+  return (slotIdx - (teamSize - 1) / 2) * gap;
+}
+function scoreIdxForPid(pid) {
+  return pidTeamKey(pid) === 'a' ? 0 : 1;
+}
+
 function wallSegmentBounds(pos) {
   const fullH = FIELD_BOTTOM - FIELD_TOP;
   const segH = fullH / 3;
@@ -124,8 +153,9 @@ class Room {
   constructor(id) {
     this.id = id;
     this.players = {};                  // pid -> ws
-    this.selectedSkills = { p1: [], p2: [] };
-    this.profiles = { p1: null, p2: null };
+    this.selectedSkills = {};
+    this.profiles = {};
+    this.teamSize = 1;
     this.gs = null;
     this.ticker = null;
     this.started = false;
@@ -140,11 +170,15 @@ class Room {
 
   // ─── Player slot / odaya katılım ───
   addPlayer(ws) {
-    for (const pid of ['p1', 'p2']) {
+    const max = this.teamSize * 2;
+    if (this.connectedCount() >= max) return null;
+    for (const pid of slotOrderForTeamSize(this.teamSize)) {
       if (!this.players[pid]) {
         this.players[pid] = ws;
         ws.roomId = this.id;
         ws.pid = pid;
+        if (!Object.prototype.hasOwnProperty.call(this.selectedSkills, pid)) this.selectedSkills[pid] = [];
+        if (!Object.prototype.hasOwnProperty.call(this.profiles, pid)) this.profiles[pid] = null;
         return pid;
       }
     }
@@ -154,7 +188,7 @@ class Room {
     delete this.players[pid];
   }
   isFull() {
-    return !!(this.players.p1 && this.players.p2);
+    return this.connectedCount() >= this.teamSize * 2;
   }
   connectedCount() {
     return Object.keys(this.players).length;
@@ -173,16 +207,19 @@ class Room {
 
   // ─── State init ───
   createPlayerData(pid) {
-    const isP1 = pid === 'p1';
+    const tk = pidTeamKey(pid);
+    const isA = tk === 'a';
+    const slotIdx = pidSlotIndex(pid);
+    const ySpread = teamSpreadY(this.teamSize, slotIdx);
     return {
-      x: isP1 ? PLAY_LEFT + 60 : PLAY_RIGHT - 60,
-      y: H / 2,
+      x: isA ? PLAY_LEFT + 60 : PLAY_RIGHT - 60,
+      y: H / 2 + ySpread,
       vx: 0, vy: 0,
       r: PLAYER_R,
-      color: isP1 ? '#00d4ff' : '#ff4d6d',
-      team: pid,
-      facing: isP1 ? 1 : -1,
-      lastDirX: isP1 ? 1 : -1,
+      color: isA ? '#00d4ff' : '#ff4d6d',
+      team: tk,
+      facing: isA ? 1 : -1,
+      lastDirX: isA ? 1 : -1,
       lastDirY: 0,
       frozenTimer: 0,
       poweredTimer: 0,
@@ -220,7 +257,7 @@ class Room {
       smokeZones: [],
       freezeProjectile: null,
       hookProjectile: null,
-      foulAttempts: { p1: 0, p2: 0 },
+      foulAttempts: {},
       penaltyMode: null,
       walls: [],
       blindTimer: 0, blindOwner: null,
@@ -235,7 +272,7 @@ class Room {
       },
       players: {},
     };
-    ['p1', 'p2'].forEach(pid => {
+    Object.keys(this.players).forEach(pid => {
       if (!this.players[pid]) return;
       this.gs.players[pid] = this.createPlayerData(pid);
       const skills = (this.selectedSkills[pid] || []).slice(0, 4);
@@ -243,6 +280,9 @@ class Room {
         const full = ALL_SKILLS.find(s => s.id === sk.id) || sk;
         return { ...full, cdLeft: 0, active: false };
       });
+    });
+    Object.keys(this.gs.players).forEach(pid => {
+      this.gs.foulAttempts[pid] = 0;
     });
   }
 
@@ -281,7 +321,7 @@ class Room {
       if (b.holder === null && !b.lobMode) {
         const bspeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
         if (bspeed > 0.5) {
-          const goalDir = pid === 'p1' ? 1 : -1;
+          const goalDir = pidTeamKey(pid) === 'a' ? 1 : -1;
           const r1vx = b.vy, r1vy = -b.vx;
           const r2vx = -b.vy, r2vy = b.vx;
           const useR1 = (r1vx * goalDir >= r2vx * goalDir);
@@ -307,7 +347,7 @@ class Room {
       case 'clone': {
         ab.active = true; ab.cdLeft = ab.cd;
         // Deterministik (random değil): online client ile aynı yön, gecikmesiz öngörü
-        const goUp = pid === 'p1';
+        const goUp = pidTeamKey(pid) === 'a';
         const realDY = goUp ? -72 : 72;
         const cloneY = p.y + (goUp ? 72 : -72);
         p.y = Math.max(FIELD_TOP + 15, Math.min(FIELD_BOTTOM - 15, p.y + realDY));
@@ -351,8 +391,12 @@ class Room {
       }
       case 'reverse': {
         ab.active = true; ab.cdLeft = ab.cd;
-        const opp = this.gs.players[this.getOpponentPid(pid)];
-        if (opp) opp.controlsReversedTimer = ab.duration;
+        const myT = pidTeamKey(pid);
+        Object.keys(this.gs.players).forEach(oid => {
+          if (pidTeamKey(oid) === myT) return;
+          const opp = this.gs.players[oid];
+          if (opp) opp.controlsReversedTimer = ab.duration;
+        });
         this.addFlash('🔀 TERSLE!', ab.color);
         break;
       }
@@ -432,7 +476,7 @@ class Room {
     if (!p || !p.wallPreview || !p.wallPreview.active) return;
     const ab = p.abilities.find(a => a.id === 'wall');
     if (!ab) return;
-    const side = pid === 'p1' ? 'left' : 'right';
+    const side = pidTeamKey(pid) === 'a' ? 'left' : 'right';
     this.gs.walls = (this.gs.walls || []).filter(w => w.owner !== pid);
     this.gs.walls.push({ side, pos: p.wallPreview.pos, owner: pid, life: ab.duration });
     ab.cdLeft = ab.cd;
@@ -661,9 +705,18 @@ class Room {
 
   throwBall(pid) {
     const p = this.gs.players[pid];
-    const opp = this.gs.players[this.getOpponentPid(pid)];
     const b = this.gs.ball;
-    if (!p || !opp || b.holder !== pid) return;
+    if (!p || b.holder !== pid) return;
+    const myT = pidTeamKey(pid);
+    let opp = null;
+    let bestD = 1e9;
+    for (const oid of Object.keys(this.gs.players)) {
+      if (oid === pid || pidTeamKey(oid) === myT) continue;
+      const o = this.gs.players[oid];
+      const d = Math.hypot(o.x - p.x, o.y - p.y);
+      if (d < bestD) { bestD = d; opp = o; }
+    }
+    if (!opp) return;
     p.passCharging = false; p.passChargeMs = 0;
     p.longPassCharging = false; p.longPassChargeMs = 0;
     b.holder = null; b.inAir = true;
@@ -678,9 +731,22 @@ class Room {
   attemptTackle(pid) {
     const b = this.gs.ball;
     const p = this.gs.players[pid];
-    const oppPid = this.getOpponentPid(pid);
-    const opp = this.gs.players[oppPid];
-    if (!p || !opp) return;
+    const myT = pidTeamKey(pid);
+    let oppPid = null;
+    let opp = null;
+    if (b.holder && b.holder !== pid && pidTeamKey(b.holder) !== myT) {
+      oppPid = b.holder;
+      opp = this.gs.players[oppPid];
+    } else {
+      let bestD = 1e9;
+      for (const oid of Object.keys(this.gs.players)) {
+        if (oid === pid || pidTeamKey(oid) === myT) continue;
+        const o = this.gs.players[oid];
+        const d = Math.hypot(o.x - p.x, o.y - p.y);
+        if (d < bestD) { bestD = d; oppPid = oid; opp = o; }
+      }
+    }
+    if (!p || !opp || !oppPid) return;
     if (p.frozenTimer > 0 || this.gs.penaltyMode) return;
     // Top sende ise hiçbir şey yapma (yerel ile aynı)
     if (b.holder === pid) return;
@@ -747,7 +813,8 @@ class Room {
   // ─────────────── PENALTY ───────────────
   triggerFoul(foulerPid, victimPid) {
     this.addFlash('🚨 FAUL!', '#ff4444');
-    this.gs.foulAttempts = { p1: 0, p2: 0 };
+    this.gs.foulAttempts = {};
+    Object.keys(this.gs.players).forEach(pp => { this.gs.foulAttempts[pp] = 0; });
     this.gs.penaltyMode = { pending: true, kicker: victimPid, keeper: foulerPid, active: false, shot: false };
     const b = this.gs.ball;
     if (b.holder === null) { b.vx = 0; b.vy = 0; b.inAir = false; }
@@ -755,7 +822,7 @@ class Room {
     b.shotMode = false; b.shotOwner = null;
     b.teknikPassMode = false;
     b.lobMode = false;
-    ['p1', 'p2'].forEach(pp => {
+    Object.keys(this.gs.players).forEach(pp => {
       const pl = this.gs.players[pp];
       if (!pl) return;
       pl.passCharging = false; pl.passChargeMs = 0;
@@ -777,7 +844,7 @@ class Room {
     if (!kicker) return;
     kicker.x = W / 2;
     kicker.y = H / 2;
-    kicker.lastDirX = keeperPid === 'p1' ? -1 : 1;
+    kicker.lastDirX = pidTeamKey(keeperPid) === 'a' ? -1 : 1;
     kicker.lastDirY = 0;
     const b = this.gs.ball;
     b.holder = kickerPid;
@@ -785,7 +852,7 @@ class Room {
     b.y = kicker.y;
     b.vx = 0; b.vy = 0; b.inAir = false;
     const greenStart = 0.12 + Math.random() * 0.65;
-    const goalX = keeperPid === 'p1' ? PLAY_LEFT : PLAY_RIGHT;
+    const goalX = pidTeamKey(keeperPid) === 'a' ? PLAY_LEFT : PLAY_RIGHT;
     this.gs.penaltyMode = {
       pending: false,
       active: true,
@@ -798,7 +865,7 @@ class Room {
     };
     // Penaltıda mevcut duvarlar silinsin
     if (this.gs.walls && this.gs.walls.length) this.gs.walls = [];
-    ['p1', 'p2'].forEach(pp => {
+    Object.keys(this.gs.players).forEach(pp => {
       const pl = this.gs.players[pp];
       if (pl && pl.wallPreview) pl.wallPreview.active = false;
     });
@@ -834,10 +901,10 @@ class Room {
     if (!this.gs.penaltyMode) return;
     this.gs.penaltyMode.active = false;
     if (scorerPid) {
-      const idx = scorerPid === 'p1' ? 0 : 1;
+      const idx = scoreIdxForPid(scorerPid);
       this.gs.score[idx]++;
-      this.addFlash(scorerPid === 'p1' ? '🔵 PENALTİ GOL! +1' : '🔴 PENALTİ GOL! +1', scorerPid === 'p1' ? '#00d4ff' : '#ff4d6d');
-      if (this.gs.score[idx] >= WIN_SCORE) { this.endGame(scorerPid); return; }
+      this.addFlash(pidTeamKey(scorerPid) === 'a' ? '🔵 PENALTİ GOL! +1' : '🔴 PENALTİ GOL! +1', pidTeamKey(scorerPid) === 'a' ? '#00d4ff' : '#ff4d6d');
+      if (this.gs.score[idx] >= WIN_SCORE) { this.endGame(pidTeamKey(scorerPid)); return; }
     } else {
       this.addFlash('❌ PENALTİ ISKALANDI!', '#888');
     }
@@ -1258,7 +1325,7 @@ class Room {
         t.frozenTimer = 2000;
         if (b.holder === hitTarget) {
           b.holder = null;
-          b.vx = t.team === 'p1' ? -2 : 2; b.vy = 0;
+          b.vx = pidTeamKey(t) === 'a' ? -2 : 2; b.vy = 0;
         }
         this.addFlash('🧊 DONDU!', '#88eeff');
         this.gs.freezeProjectile = null;
@@ -1330,10 +1397,11 @@ class Room {
     this.gs.smokeZones = this.gs.smokeZones.filter(z => { z.life -= dt; return z.life > 0; });
 
     // Clone teleport / clone destroy
-    ['p1', 'p2'].forEach(pid => {
+    Object.keys(this.gs.players).forEach(pid => {
       const p = this.gs.players[pid];
       if (!p) return;
-      const opp = this.gs.players[this.getOpponentPid(pid)];
+      const myT = pidTeamKey(pid);
+      const oppIds = Object.keys(this.gs.players).filter(oid => oid !== pid && pidTeamKey(oid) !== myT);
       if (b.holder === null && !b.lobMode && p.clones.length > 0 && p.frozenTimer <= 0) {
         for (let i = 0; i < p.clones.length; i++) {
           const c = p.clones[i];
@@ -1348,16 +1416,18 @@ class Room {
           }
         }
       }
-      if (opp) {
-        p.clones = p.clones.filter(c => {
+      p.clones = p.clones.filter(c => {
+        for (const oid of oppIds) {
+          const opp = this.gs.players[oid];
+          if (!opp) continue;
           const cdx = opp.x - c.x, cdy = opp.y - c.y;
           if (Math.sqrt(cdx * cdx + cdy * cdy) < p.r + opp.r + 2) {
             this.addFlash('👻 HAYALET!', p.color);
             return false;
           }
-          return true;
-        });
-      }
+        }
+        return true;
+      });
     });
   }
 
@@ -1367,7 +1437,7 @@ class Room {
     // Penalty shot
     if (this.gs.penaltyMode && this.gs.penaltyMode.shot && this.gs.penaltyMode.active) {
       const pm = this.gs.penaltyMode;
-      const crossed = pm.keeper === 'p1' ? (b.x < pm.goalX) : (b.x > pm.goalX);
+      const crossed = pidTeamKey(pm.keeper) === 'a' ? (b.x < pm.goalX) : (b.x > pm.goalX);
       if (crossed) {
         const hit = Math.abs(b.y - pm.goalY) < pm.goalH / 2;
         if (hit) this.endPenaltyMode(pm.kicker);
@@ -1383,23 +1453,23 @@ class Room {
     if (this.gs.penaltyMode) return;
 
     let scorer = null;
-    ['p1', 'p2'].forEach(pid => {
+    Object.keys(this.gs.players).forEach(pid => {
       const p = this.gs.players[pid];
       if (!p) return;
       if (b.holder === pid) {
-        if (pid === 'p1' && p.x > PLAY_RIGHT) {
+        if (pidTeamKey(pid) === 'a' && p.x > PLAY_RIGHT) {
           const wblock = (this.gs.walls || []).find(w => w.side === 'right' && yInWallSegment(p.y, w.pos));
           if (wblock) {
             p.x = PLAY_RIGHT - p.r - 2;
             wblock.life = Math.max(0, wblock.life - 500);
-          } else scorer = 'p1';
+          } else scorer = pid;
         }
-        if (pid === 'p2' && p.x < PLAY_LEFT) {
+        if (pidTeamKey(pid) === 'b' && p.x < PLAY_LEFT) {
           const wblock = (this.gs.walls || []).find(w => w.side === 'left' && yInWallSegment(p.y, w.pos));
           if (wblock) {
             p.x = PLAY_LEFT + p.r + 2;
             wblock.life = Math.max(0, wblock.life - 500);
-          } else scorer = 'p2';
+          } else scorer = pid;
         }
       }
     });
@@ -1409,7 +1479,7 @@ class Room {
       const goalTopY = H / 2 - SHOT_GOAL_H / 2;
       const goalBotY = H / 2 + SHOT_GOAL_H / 2;
       const inGoalY = b.y > goalTopY && b.y < goalBotY;
-      if (b.shotOwner === 'p1' && b.x + BALL_R > PLAY_RIGHT) {
+      if (pidTeamKey(b.shotOwner) === 'a' && b.x + BALL_R > PLAY_RIGHT) {
         if (inGoalY) {
           const blocker = (this.gs.walls || []).find(w => w.side === 'right' && yInWallSegment(b.y, w.pos));
           if (blocker) {
@@ -1417,13 +1487,13 @@ class Room {
             b.shotMode = false; b.shotOwner = null;
             blocker.life = Math.max(0, blocker.life - 1500);
             this.addFlash('🛡️ DUVAR ENGELLEDİ!', '#ff8800');
-          } else scorer = 'p1';
+          } else scorer = b.shotOwner;
         } else {
           b.x = PLAY_RIGHT - BALL_R; b.vx = -Math.abs(b.vx) * 0.75;
           b.shotMode = false; b.shotOwner = null;
           this.addFlash('💨 ISKA!', '#ff4444');
         }
-      } else if (b.shotOwner === 'p2' && b.x - BALL_R < PLAY_LEFT) {
+      } else if (pidTeamKey(b.shotOwner) === 'b' && b.x - BALL_R < PLAY_LEFT) {
         if (inGoalY) {
           const blocker = (this.gs.walls || []).find(w => w.side === 'left' && yInWallSegment(b.y, w.pos));
           if (blocker) {
@@ -1431,7 +1501,7 @@ class Room {
             b.shotMode = false; b.shotOwner = null;
             blocker.life = Math.max(0, blocker.life - 1500);
             this.addFlash('🛡️ DUVAR ENGELLEDİ!', '#ff8800');
-          } else scorer = 'p2';
+          } else scorer = b.shotOwner;
         } else {
           b.x = PLAY_LEFT + BALL_R; b.vx = Math.abs(b.vx) * 0.75;
           b.shotMode = false; b.shotOwner = null;
@@ -1453,9 +1523,9 @@ class Room {
     }
 
     if (scorer) {
-      const idx = scorer === 'p1' ? 0 : 1;
+      const idx = scoreIdxForPid(scorer);
       this.gs.score[idx]++;
-      this.addFlash(scorer === 'p1' ? '🔵 GOL! +1' : '🔴 GOL! +1', scorer === 'p1' ? '#00d4ff' : '#ff4d6d');
+      this.addFlash(pidTeamKey(scorer) === 'a' ? '🔵 GOL! +1' : '🔴 GOL! +1', pidTeamKey(scorer) === 'a' ? '#00d4ff' : '#ff4d6d');
       if (this.gs.score[idx] >= WIN_SCORE) { this.endGame(scorer); return; }
       this.resetRound();
     }
@@ -1489,11 +1559,15 @@ class Room {
       shotMode: false, shotOwner: null,
       teknikPassMode: false,
     };
-    ['p1', 'p2'].forEach(pid => {
+    Object.keys(this.gs.players).forEach(pid => {
       const p = this.gs.players[pid];
       if (!p) return;
-      p.x = pid === 'p1' ? PLAY_LEFT + 60 : PLAY_RIGHT - 60;
-      p.y = H / 2;
+      const tk = pidTeamKey(pid);
+      const isA = tk === 'a';
+      const slotIdx = pidSlotIndex(pid);
+      const ySpread = teamSpreadY(this.teamSize, slotIdx);
+      p.x = isA ? PLAY_LEFT + 60 : PLAY_RIGHT - 60;
+      p.y = H / 2 + ySpread;
       p.frozenTimer = 0;
       p.poweredTimer = 0;
       p.slideTimer = 0;
@@ -1518,7 +1592,8 @@ class Room {
     this.gs.slowZones = [];
     this.gs.smokeProjectiles = [];
     this.gs.smokeZones = [];
-    this.gs.foulAttempts = { p1: 0, p2: 0 };
+    this.gs.foulAttempts = {};
+    Object.keys(this.gs.players).forEach(pp => { this.gs.foulAttempts[pp] = 0; });
     this.gs.penaltyMode = null;
     this.gs.blindTimer = 0; this.gs.blindOwner = null;
     this.gs.invisBallTimer = 0;
@@ -1531,13 +1606,15 @@ class Room {
     this.gameOver = true;
     this.started = false;
     if (this.ticker) { clearTimeout(this.ticker); this.ticker = null; }
-    this.broadcast({ type: 'gameover', winner, score: this.gs.score });
+    let w = winner;
+    if (w !== 'draw' && w !== 'a' && w !== 'b') w = pidTeamKey(w);
+    this.broadcast({ type: 'gameover', winner: w, score: this.gs.score });
   }
 
   // ─────────────── TICK ───────────────
   tick(dt) {
     if (!this.gs) return;
-    ['p1', 'p2'].forEach(pid => this.updatePlayer(pid, dt));
+    Object.keys(this.gs.players).forEach(pid => this.updatePlayer(pid, dt));
     this.updateBall(dt);
     this.updatePenaltyBar(dt);
     this.checkCollisions(dt);
@@ -1549,7 +1626,7 @@ class Room {
       this.timerTick -= 1000;
       this.timeLeft--;
       if (this.timeLeft <= 0) {
-        const winner = this.gs.score[0] > this.gs.score[1] ? 'p1' : (this.gs.score[1] > this.gs.score[0] ? 'p2' : 'draw');
+        const winner = this.gs.score[0] > this.gs.score[1] ? 'a' : (this.gs.score[1] > this.gs.score[0] ? 'b' : 'draw');
         this.endGame(winner);
         return;
       }
@@ -1710,10 +1787,9 @@ class Room {
         const arr = this._perfSamples;
         const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
         const max = Math.max(...arr);
-        const bufP1 = (this.players.p1 && this.players.p1.bufferedAmount) || 0;
-        const bufP2 = (this.players.p2 && this.players.p2.bufferedAmount) || 0;
+        const bufSum = Object.values(this.players).reduce((s, w) => s + ((w && w.bufferedAmount) || 0), 0);
         const drops = this._perfDrops;
-        console.log(`[perf] tick avg=${avg.toFixed(2)}ms max=${max.toFixed(1)}ms samples=${arr.length} drops=${drops} | ws buf p1=${bufP1}B p2=${bufP2}B`);
+        console.log(`[perf] tick avg=${avg.toFixed(2)}ms max=${max.toFixed(1)}ms samples=${arr.length} drops=${drops} | ws buf sum=${bufSum}B`);
         this._perfSamples = [];
         this._perfDrops = 0;
         this._perfReportAt = now + 5000;
@@ -1741,11 +1817,15 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'create_room') {
       const roomId = crypto.randomBytes(3).toString('hex').toUpperCase();
       const room = new Room(roomId);
+      room.teamSize = Math.min(3, Math.max(1, Number(msg.teamSize) || 1));
       rooms.set(roomId, room);
       const pid = room.addPlayer(ws);
       ws.send(JSON.stringify({
         type: 'room_created',
         roomId, pid,
+        teamSize: room.teamSize,
+        maxPlayers: room.teamSize * 2,
+        playerCount: room.connectedCount(),
         allSkills: ALL_SKILLS,
         profiles: PROFILES,
       }));
@@ -1753,18 +1833,28 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'join_room') {
       const roomId = (msg.roomId || '').toUpperCase().trim();
       const room = rooms.get(roomId);
-      if (!room || room.started || room.isFull()) {
-        ws.send(JSON.stringify({ type: 'error', msg: 'Oda dolu veya bulunamadı.' }));
+      const want = Math.min(3, Math.max(1, Number(msg.teamSize) || 1));
+      if (!room || room.started || room.teamSize !== want || room.isFull()) {
+        ws.send(JSON.stringify({ type: 'error', msg: 'Oda dolu, mod uyuşmuyor veya bulunamadı.' }));
         return;
       }
       const pid = room.addPlayer(ws);
+      if (!pid) {
+        ws.send(JSON.stringify({ type: 'error', msg: 'Oda dolu.' }));
+        return;
+      }
+      const cnt = room.connectedCount();
+      const maxP = room.teamSize * 2;
       ws.send(JSON.stringify({
         type: 'room_joined',
         roomId, pid,
+        teamSize: room.teamSize,
+        maxPlayers: maxP,
+        playerCount: cnt,
         allSkills: ALL_SKILLS,
         profiles: PROFILES,
       }));
-      room.broadcast({ type: 'opponent_joined', pid });
+      room.broadcast({ type: 'opponent_joined', pid, playerCount: cnt, maxPlayers: maxP, roomFull: cnt >= maxP });
     }
     else if (msg.type === 'select_skills') {
       const room = rooms.get(ws.roomId);
@@ -1773,10 +1863,14 @@ wss.on('connection', (ws, req) => {
       if (msg.profile && typeof msg.profile === 'object') {
         room.profiles[ws.pid] = msg.profile;
       }
-      // Eğer iki oyuncu da seçimini gönderdiyse oyun başlasın
-      const p1Ready = (room.selectedSkills.p1 || []).length > 0 && room.profiles.p1;
-      const p2Ready = (room.selectedSkills.p2 || []).length > 0 && room.profiles.p2;
-      if (p1Ready && p2Ready) room.startGame();
+      const slots = Object.keys(room.players);
+      let allReady = slots.length > 0;
+      for (const qid of slots) {
+        const sk = room.selectedSkills[qid];
+        const pr = room.profiles[qid];
+        if (!sk || sk.length === 0 || !pr) { allReady = false; break; }
+      }
+      if (allReady) room.startGame();
     }
     else if (msg.type === 'ping') {
       try { ws.send(JSON.stringify({ type: 'pong', t: msg.t, sT: Date.now() })); } catch (_) {}
@@ -1818,8 +1912,15 @@ wss.on('connection', (ws, req) => {
       else if (msg.action === 'pass_release') room.spaceRelease(ws.pid);
       else if (msg.action === 'tackle') {
         if (process.env.DEBUG_TACKLE) {
-          const opp = room.gs.players[ws.pid === 'p1' ? 'p2' : 'p1'];
           const me = room.gs.players[ws.pid];
+          const myT = pidTeamKey(ws.pid);
+          let opp = null, bestD = 1e9;
+          for (const oid of Object.keys(room.gs.players)) {
+            if (oid === ws.pid || pidTeamKey(oid) === myT) continue;
+            const o = room.gs.players[oid];
+            const d = me && o ? Math.hypot(o.x - me.x, o.y - me.y) : 1e9;
+            if (d < bestD) { bestD = d; opp = o; }
+          }
           const dist = me && opp ? Math.hypot(opp.x - me.x, opp.y - me.y).toFixed(1) : 'n/a';
           console.log(`[tackle] ${ws.pid} distOpp=${dist} ballHolder=${room.gs.ball.holder} cd=${room.gs.tackleCooldown}`);
         }
