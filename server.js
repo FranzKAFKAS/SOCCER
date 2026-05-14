@@ -1290,21 +1290,27 @@ class Room {
       }
     }
 
-    // Auto-pickup
+    // Auto-pickup: aynı tick'te birden fazla aday varsa Object.keys sırası belirsiz — en yakın oyuncu (1v1 ile aynı his)
     const ballSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
     if (ballSpeed < 2) {
+      let bestPid = null;
+      let bestD = 1e9;
       pKeys.forEach(pid => {
         const p = this.gs.players[pid];
-        if (b.holder === null && !b.lobMode && p.frozenTimer <= 0) {
-          const bx = b.x - p.x, by = b.y - p.y;
-          if (Math.sqrt(bx * bx + by * by) < p.r + BALL_R) {
-            b.holder = pid; b.vx = 0; b.vy = 0; b.inAir = false;
-            b.shotMode = false; b.shotOwner = null;
-            b.longPassMode = false; b.longPassOwner = null;
-            b.teknikPassMode = false;
-          }
+        if (!p || b.holder !== null || b.lobMode || p.frozenTimer > 0) return;
+        const bx = b.x - p.x, by = b.y - p.y;
+        const d = Math.sqrt(bx * bx + by * by);
+        if (d < p.r + BALL_R && d < bestD) {
+          bestD = d;
+          bestPid = pid;
         }
       });
+      if (bestPid) {
+        b.holder = bestPid; b.vx = 0; b.vy = 0; b.inAir = false;
+        b.shotMode = false; b.shotOwner = null;
+        b.longPassMode = false; b.longPassOwner = null;
+        b.teknikPassMode = false;
+      }
     }
 
     // Freeze projectile
@@ -1751,9 +1757,9 @@ class Room {
     this.timerTick = 0;
     this._broadcastAcc = 0;
     this.lastTick = Date.now();
-    this.broadcast({ type: 'start' });
-    // Statik veri (color/team/profile/abilities) tek seferde gönderilir; state mesajları yalın olur
+    // Statik veri önce: istemci yetenek tanımı (cd/id) olmadan state uygulamasın
     this.broadcast(this.buildGameInit());
+    this.broadcast({ type: 'start' });
     this._perfSamples = [];
     this._perfDrops = 0;
     this._perfReportAt = Date.now() + 5000;

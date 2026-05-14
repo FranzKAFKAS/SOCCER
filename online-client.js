@@ -401,7 +401,7 @@
                     const ab = abs[i];
                     const ref = refs[i];
                     if (!ref) continue;
-                    const pct = ab.cdLeft > 0 ? (ab.cdLeft / ab.cd) * 100 : 0;
+                    const pct = (ab.cd > 0 && ab.cdLeft > 0) ? (ab.cdLeft / ab.cd) * 100 : 0;
                     const pctRounded = Math.round(pct);
                     if (pctRounded !== last[i].pct) {
                         ref.fill.style.height = pctRounded + '%';
@@ -422,7 +422,7 @@
                         const ab = abs[i];
                         const ref = refs[i];
                         if (!ref) continue;
-                        const pct = ab.cdLeft > 0 ? (ab.cdLeft / ab.cd) * 100 : 0;
+                        const pct = (ab.cd > 0 && ab.cdLeft > 0) ? (ab.cdLeft / ab.cd) * 100 : 0;
                         const pctRounded = Math.round(pct);
                         if (pctRounded !== last[i].pct) {
                             ref.fill.style.height = pctRounded + '%';
@@ -3167,6 +3167,7 @@
             document.getElementById('waiting-room').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
             document.getElementById('error-msg').textContent = '';
+            resetOnlineGameSync();
             __onlineSkillSelectionShown = false;
         }
 
@@ -3203,6 +3204,131 @@
         }
         let __playerStatic = null;          // game_init ile gelen statik oyuncu verisi (color/abilities tanımı/profile)
         let __initialTimeLeft = 180;
+        let __gameInitReady = false;
+        let __pendingStateMsgs = [];
+        const __MAX_PENDING_STATES = 48;
+
+        function resetOnlineGameSync() {
+            __playerStatic = null;
+            __gameInitReady = false;
+            __pendingStateMsgs.length = 0;
+        }
+
+        function applyOnlineStateMessage(msg) {
+            const slim = msg.gs;
+            const players = {};
+            Object.keys(slim.players || {}).forEach(pid => {
+                const sp = slim.players[pid];
+                const stat = (__playerStatic && __playerStatic[pid]) || {};
+                const keyCodes = onlinePidTeamKey(pid) === 'a' ? ['KeyQ', 'KeyE', 'KeyR', 'KeyT'] : ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
+                const prevPl = (gs && gs.players && gs.players[pid]) || {};
+                const prevAbs = prevPl.abilities || [];
+                const abFull = (sp.abilities || []).map((ab, i) => {
+                    const statAb = (stat.abilities && stat.abilities[i]) || {};
+                    const prevA = prevAbs[i] || {};
+                    const cdBase = statAb.cd || prevA.cd || 0;
+                    return {
+                        id: statAb.id || prevA.id,
+                        icon: statAb.icon || prevA.icon,
+                        cd: cdBase,
+                        color: statAb.color || prevA.color,
+                        name: statAb.name || prevA.name,
+                        key: keyCodes[i] || prevA.key || '',
+                        cdLeft: (typeof ab.c === 'number') ? ab.c : 0,
+                        active: !!ab.a,
+                    };
+                });
+                players[pid] = Object.assign({}, sp, {
+                    color: stat.color || prevPl.color || '#fff',
+                    team: stat.team || (pidTeamLeft(pid) ? 'a' : 'b'),
+                    r: stat.r || prevPl.r || 18,
+                    profile: stat.profile || prevPl.profile || null,
+                    abilities: abFull,
+                    frozenTimer: sp.frozenTimer || 0,
+                    poweredTimer: sp.poweredTimer || 0,
+                    slideTimer: sp.slideTimer || 0,
+                    slideVx: sp.slideVx || 0,
+                    slideVy: sp.slideVy || 0,
+                    clones: sp.clones || [],
+                    controlsReversedTimer: sp.controlsReversedTimer || 0,
+                    growTimer: sp.growTimer || 0,
+                    shrinkTimer: sp.shrinkTimer || 0,
+                    pullingTimer: sp.pullingTimer || 0,
+                    pulledBy: sp.pulledBy || null,
+                    speedBoostTimer: sp.speedBoostTimer || 0,
+                    geopasActive: !!sp.geopasActive,
+                    geopasTimer: sp.geopasTimer || 0,
+                    shotActiveTimer: sp.shotActiveTimer || 0,
+                    passCharging: !!sp.passCharging,
+                    passChargeMs: sp.passChargeMs || 0,
+                    longPassCharging: !!sp.longPassCharging,
+                    longPassChargeMs: sp.longPassChargeMs || 0,
+                    lobCharging: !!sp.lobCharging,
+                    lobChargeTimer: sp.lobChargeTimer || 0,
+                    slowOrbCharging: !!sp.slowOrbCharging,
+                    slowOrbChargeTimer: sp.slowOrbChargeTimer || 0,
+                    smokeCharging: !!sp.smokeCharging,
+                    smokeChargeTimer: sp.smokeChargeTimer || 0,
+                    wallPreview: sp.wallPreview ? { active: !!sp.wallPreview.active, pos: sp.wallPreview.pos || 0 } : null,
+                });
+            });
+            gs = Object.assign({}, slim, {
+                players,
+                walls: slim.walls || [],
+                slowZones: slim.slowZones || [],
+                smokeZones: slim.smokeZones || [],
+                slowOrbProjectiles: slim.slowOrbProjectiles || [],
+                smokeProjectiles: slim.smokeProjectiles || [],
+                tackleCooldown: slim.tackleCooldown || 0,
+                blindTimer: slim.blindTimer || 0,
+                blindOwner: slim.blindOwner != null ? slim.blindOwner : null,
+                invisBallTimer: slim.invisBallTimer || 0,
+                invisBallOwner: (slim.invisBallTimer > 0 && slim.invisBallOwner != null) ? slim.invisBallOwner : null,
+            });
+            const snap = {
+                t: performance.now(),
+                players: {},
+                ball: { x: gs.ball.x, y: gs.ball.y, holder: gs.ball.holder },
+            };
+            Object.keys(gs.players).forEach(pid => {
+                snap.players[pid] = {
+                    x: gs.players[pid].x,
+                    y: gs.players[pid].y,
+                    lastDirX: gs.players[pid].lastDirX,
+                    lastDirY: gs.players[pid].lastDirY,
+                };
+            });
+            __snapshots.push(snap);
+            if (__snapshots.length > 10) __snapshots.shift();
+            if (!window.__netDiag) window.__netDiag = { samples: [], reportAt: snap.t + 5000, count: 0 };
+            const nd = window.__netDiag;
+            if (nd.lastT) nd.samples.push(snap.t - nd.lastT);
+            nd.lastT = snap.t;
+            if (snap.t > nd.reportAt && nd.samples.length > 5 && nd.count < 6) {
+                const arr = nd.samples;
+                const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+                const max = Math.max(...arr);
+                const min = Math.min(...arr);
+                const variance = arr.reduce((s, v) => s + (v - avg) * (v - avg), 0) / arr.length;
+                const stddev = Math.sqrt(variance);
+                console.log(`[net] snap interval avg=${avg.toFixed(1)}ms min=${min.toFixed(0)} max=${max.toFixed(0)} stddev=${stddev.toFixed(1)}ms n=${arr.length}`);
+                nd.samples = [];
+                nd.reportAt = snap.t + 5000;
+                nd.count++;
+            }
+            const needHud = (() => {
+                if (!gameStarted || !myPid) return !document.getElementById('p1-ab-0');
+                if (onlineArenaMultiPid()) {
+                    const dom = pidTeamLeft(myPid) ? 'p1' : 'p2';
+                    return !document.getElementById(`${dom}-ab-0`);
+                }
+                return !document.getElementById('p1-ab-0');
+            })();
+            if (needHud) buildHUD();
+            updateHUD(16);
+            if (msg.flashes) msg.flashes.forEach(f => showFlash(f.msg, f.color));
+        }
+
         // Client-side prediction: kendi karakterin için lokal pozisyon — input lag'i öldürür
         let __pred = { x: null, y: null, lastDirX: 1, lastDirY: 0, lastInputAt: 0 };
         const __PRED_SPEED = 3.2; // PLAYER_SPEED ile aynı
@@ -3320,6 +3446,7 @@
         }
 
         function initSocket() {
+            resetOnlineGameSync();
             socket = new WebSocket(WS_URL);
             socket.onopen = () => {
                 const em = document.getElementById('error-msg');
@@ -3348,6 +3475,7 @@
                 const msg = JSON.parse(e.data);
                 emitGameEvent('socket_message', { msgType: msg.type });
                 if (msg.type === 'room_created') {
+                    resetOnlineGameSync();
                     myPid = msg.pid; myRoomId = msg.roomId; allSkills = msg.allSkills;
                     myTeam = myPid;
                     if (typeof msg.teamSize === 'number') onlineTeamSize = msg.teamSize;
@@ -3359,6 +3487,7 @@
                     const st = document.getElementById('waiting-status');
                     if (st) st.textContent = 'Oyuncular: ' + (msg.playerCount || 1) + '/' + onlineMaxPlayers + ' — aynı mod (1v1 / 2v2 / 3v3) ile katılın';
                 } else if (msg.type === 'room_joined') {
+                    resetOnlineGameSync();
                     myPid = msg.pid; myRoomId = msg.roomId; allSkills = msg.allSkills;
                     myTeam = myPid;
                     if (typeof msg.teamSize === 'number') onlineTeamSize = msg.teamSize;
@@ -3392,9 +3521,11 @@
                     resizeGame();
                     requestAnimationFrame(gameLoop);
                 } else if (msg.type === 'game_init') {
-                    // Statik veriyi sakla (color/team/profile/abilities tanımı) — her tick'te tekrar gelmiyor
                     __playerStatic = msg.players || {};
                     if (typeof msg.timeLeft === 'number') __initialTimeLeft = msg.timeLeft;
+                    __gameInitReady = true;
+                    const pend = __pendingStateMsgs.splice(0);
+                    pend.forEach(applyOnlineStateMessage);
                 } else if (msg.type === 'pong') {
                     const rtt = performance.now() - msg.t;
                     if (!window.__rttDiag) window.__rttDiag = { samples: [], lastSpikeAt: 0 };
@@ -3411,126 +3542,11 @@
                         );
                     }
                 } else if (msg.type === 'state') {
-                    // Sunucudan zayıf state geldi; eksik alanları statik veriyle doldur
-                    const slim = msg.gs;
-                    const players = {};
-                    Object.keys(slim.players || {}).forEach(pid => {
-                        const sp = slim.players[pid];
-                        const stat = (__playerStatic && __playerStatic[pid]) || {};
-                        const keyCodes = onlinePidTeamKey(pid) === 'a' ? ['KeyQ', 'KeyE', 'KeyR', 'KeyT'] : ['KeyU', 'KeyI', 'KeyO', 'KeyP'];
-                        // Yetenekleri statik tanım + dinamik c/a ile birleştir
-                        const abFull = (sp.abilities || []).map((ab, i) => {
-                            const statAb = (stat.abilities && stat.abilities[i]) || {};
-                            return {
-                                id: statAb.id,
-                                icon: statAb.icon,
-                                cd: statAb.cd,
-                                color: statAb.color,
-                                name: statAb.name,
-                                key: keyCodes[i] || '',
-                                cdLeft: ab.c || 0,
-                                active: !!ab.a,
-                            };
-                        });
-                        players[pid] = Object.assign({}, sp, {
-                            color: stat.color || '#fff',
-                            team: stat.team || pid,
-                            r: stat.r || 18,
-                            profile: stat.profile || null,
-                            abilities: abFull,
-                            // Eksik dinamik alanlar varsayılan değerlerle
-                            frozenTimer: sp.frozenTimer || 0,
-                            poweredTimer: sp.poweredTimer || 0,
-                            slideTimer: sp.slideTimer || 0,
-                            slideVx: sp.slideVx || 0,
-                            slideVy: sp.slideVy || 0,
-                            clones: sp.clones || [],
-                            controlsReversedTimer: sp.controlsReversedTimer || 0,
-                            growTimer: sp.growTimer || 0,
-                            shrinkTimer: sp.shrinkTimer || 0,
-                            pullingTimer: sp.pullingTimer || 0,
-                            pulledBy: sp.pulledBy || null,
-                            speedBoostTimer: sp.speedBoostTimer || 0,
-                            geopasActive: !!sp.geopasActive,
-                            geopasTimer: sp.geopasTimer || 0,
-                            shotActiveTimer: sp.shotActiveTimer || 0,
-                            passCharging: !!sp.passCharging,
-                            passChargeMs: sp.passChargeMs || 0,
-                            longPassCharging: !!sp.longPassCharging,
-                            longPassChargeMs: sp.longPassChargeMs || 0,
-                            lobCharging: !!sp.lobCharging,
-                            lobChargeTimer: sp.lobChargeTimer || 0,
-                            slowOrbCharging: !!sp.slowOrbCharging,
-                            slowOrbChargeTimer: sp.slowOrbChargeTimer || 0,
-                            smokeCharging: !!sp.smokeCharging,
-                            smokeChargeTimer: sp.smokeChargeTimer || 0,
-                            wallPreview: sp.wallPreview ? { active: !!sp.wallPreview.active, pos: sp.wallPreview.pos || 0 } : null,
-                        });
-                    });
-                    gs = Object.assign({}, slim, {
-                        players,
-                        walls: slim.walls || [],
-                        slowZones: slim.slowZones || [],
-                        smokeZones: slim.smokeZones || [],
-                        slowOrbProjectiles: slim.slowOrbProjectiles || [],
-                        smokeProjectiles: slim.smokeProjectiles || [],
-                        tackleCooldown: slim.tackleCooldown || 0,
-                        blindTimer: slim.blindTimer || 0,
-                        blindOwner: slim.blindOwner != null ? slim.blindOwner : null,
-                        invisBallTimer: slim.invisBallTimer || 0,
-                        invisBallOwner: (slim.invisBallTimer > 0 && slim.invisBallOwner != null) ? slim.invisBallOwner : null,
-                    });
-                    // Snapshot timestamp olarak performance.now() kullan.
-                    // Server-time mapping deneyleri (min-offset tracking) snapshot buffer'ında
-                    // tutarsız t değerlerine yol açıp authX'i bozuyordu.
-                    // Nagle kapalı + network stddev=0.7ms ile arrival timing zaten ~33ms aralıklı.
-                    const snap = {
-                        t: performance.now(),
-                        players: {},
-                        ball: { x: gs.ball.x, y: gs.ball.y, holder: gs.ball.holder },
-                    };
-                    Object.keys(gs.players).forEach(pid => {
-                        snap.players[pid] = {
-                            x: gs.players[pid].x,
-                            y: gs.players[pid].y,
-                            lastDirX: gs.players[pid].lastDirX,
-                            lastDirY: gs.players[pid].lastDirY,
-                        };
-                    });
-                    __snapshots.push(snap);
-                    // Buffer'ı biraz büyüt: 30Hz × 250ms = 7-8 snapshot uygun
-                    if (__snapshots.length > 10) __snapshots.shift();
-
-                    // ─── NETWORK JITTER TEŞHİSİ (ilk 30 sn) ───
-                    // Console'da ortalama snapshot aralığını ve sapmayı görürüz.
-                    // İdeal: avg ≈ 33ms (30Hz), stddev küçük. Stddev büyükse Railway jitter'ı var.
-                    if (!window.__netDiag) window.__netDiag = { samples: [], reportAt: snap.t + 5000, count: 0 };
-                    const nd = window.__netDiag;
-                    if (nd.lastT) nd.samples.push(snap.t - nd.lastT);
-                    nd.lastT = snap.t;
-                    if (snap.t > nd.reportAt && nd.samples.length > 5 && nd.count < 6) {
-                        const arr = nd.samples;
-                        const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-                        const max = Math.max(...arr);
-                        const min = Math.min(...arr);
-                        const variance = arr.reduce((s, v) => s + (v - avg) * (v - avg), 0) / arr.length;
-                        const stddev = Math.sqrt(variance);
-                        console.log(`[net] snap interval avg=${avg.toFixed(1)}ms min=${min.toFixed(0)} max=${max.toFixed(0)} stddev=${stddev.toFixed(1)}ms n=${arr.length}`);
-                        nd.samples = [];
-                        nd.reportAt = snap.t + 5000;
-                        nd.count++;
+                    if (!__gameInitReady) {
+                        if (__pendingStateMsgs.length < __MAX_PENDING_STATES) __pendingStateMsgs.push(msg);
+                    } else {
+                        applyOnlineStateMessage(msg);
                     }
-                    const needHud = (() => {
-                        if (!gameStarted || !myPid) return !document.getElementById('p1-ab-0');
-                        if (onlineArenaMultiPid()) {
-                            const dom = pidTeamLeft(myPid) ? 'p1' : 'p2';
-                            return !document.getElementById(`${dom}-ab-0`);
-                        }
-                        return !document.getElementById('p1-ab-0');
-                    })();
-                    if (needHud) buildHUD();
-                    updateHUD(16);
-                    if (msg.flashes) msg.flashes.forEach(f => showFlash(f.msg, f.color));
                 } else if (msg.type === 'gameover') {
                     document.getElementById('overlay').classList.remove('hidden');
                     const w = msg.winner;
