@@ -3172,7 +3172,12 @@
         }
 
         // --- ONLINE LOGIC ---
-        const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+        function resolveWsUrl() {
+            if (location.protocol === 'file:') return 'ws://localhost:3000';
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return proto + '//' + location.host;
+        }
+        const WS_URL = resolveWsUrl();
         let socket, myPid, myRoomId, allSkills = [], gameStarted = false;
         let myTeam = 'p1', onlineMaxPlayers = 2;
         let onlineTeamSize = 1;
@@ -3462,13 +3467,22 @@
             socket.onerror = (e) => {
                 console.error('[WS] hata', e);
                 const em = document.getElementById('error-msg');
-                if (em) em.textContent = 'Sunucuya bağlanılamadı. node server.js çalışıyor mu?';
+                if (!em) return;
+                if (location.protocol === 'file:') {
+                    em.textContent = 'Dosyadan açıldı. Terminalde npm start çalıştırıp http://localhost:3000 adresine gidin.';
+                } else {
+                    em.textContent = 'Sunucuya bağlanılamadı. Terminalde npm start çalışıyor mu? (connection dial timeout = sunucu kapalı veya tünel süresi doldu)';
+                }
             };
-            socket.onclose = () => {
-                console.warn('[WS] kapandı');
+            socket.onclose = (ev) => {
+                console.warn('[WS] kapandı', ev.code, ev.reason);
                 if (!gameStarted) {
                     const em = document.getElementById('error-msg');
-                    if (em && !em.textContent) em.textContent = 'Bağlantı koptu. Sayfayı yenileyin.';
+                    if (em && !em.textContent) {
+                        em.textContent = ev.code === 1006
+                            ? 'Bağlantı zaman aşımı — sunucu çalışmıyor olabilir (npm start).'
+                            : 'Bağlantı koptu. Sayfayı yenileyin.';
+                    }
                 }
             };
             socket.onmessage = (e) => {

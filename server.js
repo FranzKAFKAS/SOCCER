@@ -27,6 +27,7 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'indextoonline.html'));
 });
+app.get('/health', (req, res) => res.status(200).json({ ok: true }));
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname), { etag: true, lastModified: true, maxAge: '1h' }));
 // 404 yerine bilinmeyen yolları ana online sayfaya yönlendir (kullanıcı SPA gibi gezsin)
@@ -1957,6 +1958,7 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🎮 Sunucu ${PORT} portunda aktif!`);
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
+  console.log(`🎮 Sunucu http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT} — WS aynı portta`);
 });
